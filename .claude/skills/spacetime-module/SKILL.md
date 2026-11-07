@@ -50,3 +50,7 @@ export const onConnect = db.clientConnected(ctx => {});
 - CLI reducer names are snake_case: `spacetime call breach-room add_member ...`.
 - Run `npm test` (vitest + `spacetimedb/server/test-utils`) after touching roles or views; add a case to `test/roles.test.ts` for new permission rules.
 - Only `export` reducers, views and lifecycle hooks: exporting anything else (e.g. a const array) makes publish fail.
+
+## Automation
+- Shared helpers (`newIncident`, `setScope`, `raiseAlert`, `startClock`) hold the logic; reducers only check roles then call them. The drill calls the same helpers, so auto-rules fire for drill and human actions alike.
+- Scheduled work: a table with `t.scheduleAt()` + `db.reducer({ onSchedule: table }, { row: table.rowType }, ...)`. Guard scheduled reducers with `if (!ctx.senderAuth.isInternal) throw ...` so clients can't call them.

@@ -32,7 +32,7 @@ export default function CommsPage() {
   }, [messages.length, channel?.id]);
 
   if (!incident) return <NoIncident />;
-  const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? hex.slice(0, 8);
+  const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? 'Breach Room';
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

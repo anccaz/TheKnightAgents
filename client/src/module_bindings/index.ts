@@ -44,7 +44,9 @@ import SendMessageReducer from "./send_message_reducer";
 import SetFraudAlertStatusReducer from "./set_fraud_alert_status_reducer";
 import SetPhaseReducer from "./set_phase_reducer";
 import SetRoleReducer from "./set_role_reducer";
+import StartDrillReducer from "./start_drill_reducer";
 import StartLegalClockReducer from "./start_legal_clock_reducer";
+import StopDrillReducer from "./stop_drill_reducer";
 import ToggleTaskReducer from "./toggle_task_reducer";
 import UpsertScopeItemReducer from "./upsert_scope_item_reducer";
 
@@ -150,7 +152,9 @@ const reducersSchema = __reducers(
   __reducerSchema("set_fraud_alert_status", SetFraudAlertStatusReducer),
   __reducerSchema("set_phase", SetPhaseReducer),
   __reducerSchema("set_role", SetRoleReducer),
+  __reducerSchema("start_drill", StartDrillReducer),
   __reducerSchema("start_legal_clock", StartLegalClockReducer),
+  __reducerSchema("stop_drill", StopDrillReducer),
   __reducerSchema("toggle_task", ToggleTaskReducer),
   __reducerSchema("upsert_scope_item", UpsertScopeItemReducer),
 );

@@ -16,7 +16,9 @@ import SendMessageReducer from "../send_message_reducer";
 import SetFraudAlertStatusReducer from "../set_fraud_alert_status_reducer";
 import SetPhaseReducer from "../set_phase_reducer";
 import SetRoleReducer from "../set_role_reducer";
+import StartDrillReducer from "../start_drill_reducer";
 import StartLegalClockReducer from "../start_legal_clock_reducer";
+import StopDrillReducer from "../stop_drill_reducer";
 import ToggleTaskReducer from "../toggle_task_reducer";
 import UpsertScopeItemReducer from "../upsert_scope_item_reducer";
 
@@ -30,7 +32,9 @@ export type SendMessageParams = __Infer<typeof SendMessageReducer>;
 export type SetFraudAlertStatusParams = __Infer<typeof SetFraudAlertStatusReducer>;
 export type SetPhaseParams = __Infer<typeof SetPhaseReducer>;
 export type SetRoleParams = __Infer<typeof SetRoleReducer>;
+export type StartDrillParams = __Infer<typeof StartDrillReducer>;
 export type StartLegalClockParams = __Infer<typeof StartLegalClockReducer>;
+export type StopDrillParams = __Infer<typeof StopDrillReducer>;
 export type ToggleTaskParams = __Infer<typeof ToggleTaskReducer>;
 export type UpsertScopeItemParams = __Infer<typeof UpsertScopeItemReducer>;
 

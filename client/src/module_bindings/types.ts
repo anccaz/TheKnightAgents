@@ -33,6 +33,14 @@ export type Channel = __Infer<typeof Channel>;
 export const Channels = __t.object("Channels", {});
 export type Channels = __Infer<typeof Channels>;
 
+export const DrillStep = __t.object("DrillStep", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  incidentId: __t.u64(),
+  step: __t.u32(),
+});
+export type DrillStep = __Infer<typeof DrillStep>;
+
 export const FraudAlert = __t.object("FraudAlert", {
   id: __t.u64(),
   incidentId: __t.u64(),

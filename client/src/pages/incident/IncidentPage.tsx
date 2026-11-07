@@ -3,41 +3,9 @@ import { useState, type FormEvent } from 'react';
 import { useReducer, useTable } from 'spacetimedb/react';
 import { reducers, tables } from '../../module_bindings';
 import { useRun } from '../../components/Toast';
-import { LEADS, PHASES, PHASE_LABEL, SEVERITIES, WRITERS, can, useCurrentIncident, useMe } from '../../components/shared';
+import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SEVERITIES, WRITERS, can, useCurrentIncident, useMe } from '../../components/shared';
 
-// Guided steps per phase (NIST SP 800-61 lifecycle, bank flavour). Legal timings: Lane D verifies.
-const NEXT_STEPS: Record<string, string[]> = {
-  detect: [
-    'Confirm the alert is real, not a false alarm',
-    'Write what you saw and when in the timeline',
-    'Page the incident lead and open this war room',
-  ],
-  analyze: [
-    'List every affected system and customer in What was hit',
-    'Copy logs and memory before anything is rebooted',
-    'Ask Legal to start deadline clocks (bank regulator: 36 hours)',
-  ],
-  contain: [
-    'Unplug affected machines from the network, do not power them off',
-    'Reset passwords and keys for exposed accounts',
-    'Freeze suspicious transfers in Fraud alerts',
-  ],
-  eradicate: [
-    'Remove the malware and every attacker login',
-    'Patch the hole they came in through',
-    'Scan again to confirm no backdoors are left',
-  ],
-  recover: [
-    'Restore systems from clean, tested backups',
-    'Watch restored systems closely for 48 hours',
-    'Send customer notices once Legal approves',
-  ],
-  post_incident: [
-    'Hold a blameless review within two weeks',
-    'Write down what to change next time',
-    'Mark every legal deadline as filed',
-  ],
-};
+// Guided steps live on the server now: declaring an incident or changing phase creates them as tasks.
 
 const KIND_LABEL: Record<string, string> = {
   note: 'Note',
@@ -45,6 +13,7 @@ const KIND_LABEL: Record<string, string> = {
   scope_change: 'What was hit',
   action: 'Action',
   ioc: 'Clue',
+  auto: '⚡ Auto',
 };
 
 export default function IncidentPage() {
@@ -52,13 +21,15 @@ export default function IncidentPage() {
   if (!incident) return <DeclareForm />;
   return (
     <section>
-      <h1>{incident.title}</h1>
+      <div className="title-row">
+        <h1>{incident.title}</h1>
+        <DrillControls />
+      </div>
       <PhaseStepper incidentId={incident.id} phase={incident.phase} />
       <div className="grid2">
-        <NextSteps incidentId={incident.id} phase={incident.phase} />
         <Tasks incidentId={incident.id} phase={incident.phase} />
+        <Timeline incidentId={incident.id} />
       </div>
-      <Timeline incidentId={incident.id} />
     </section>
   );
 }
@@ -104,6 +75,7 @@ function DeclareForm() {
         </select>
       </label>
       <button className="primary big" type="submit">Declare incident</button>
+      <p className="muted">Practising? <DrillControls /></p>
     </form>
   );
 }
@@ -141,36 +113,19 @@ function PhaseStepper({ incidentId, phase }: { incidentId: bigint; phase: string
   );
 }
 
-function NextSteps({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+function DrillControls() {
   const me = useMe();
-  const [allTasks] = useTable(tables.tasks);
-  const addTask = useReducer(reducers.addTask);
+  const startDrill = useReducer(reducers.startDrill);
+  const stopDrill = useReducer(reducers.stopDrill);
   const run = useRun();
-  const steps = NEXT_STEPS[phase] ?? [];
-  const taskFor = (s: string) => allTasks.find(t => t.incidentId === incidentId && t.title === s);
-  const missing = steps.filter(s => !taskFor(s));
-  const addAll = () => {
-    for (const title of missing) run(addTask({ incidentId, title, phase }));
-  };
+  if (!can(me, LEADS)) return null;
   return (
-    <div className="card">
-      <h2>What do I do next?</h2>
-      <ol>
-        {steps.map(s => {
-          const t = taskFor(s);
-          return (
-            <li key={s}>
-              {s} {t && <span className="muted">{t.done ? '(✓ done)' : '(in tasks)'}</span>}
-            </li>
-          );
-        })}
-      </ol>
-      {missing.length > 0 && can(me, WRITERS) && (
-        <button className="primary" onClick={addAll}>
-          Add {missing.length === steps.length ? 'these steps' : `${missing.length} remaining`} to tasks
-        </button>
-      )}
-    </div>
+    <span className="actions">
+      <button type="button" onClick={() => window.confirm('Start a live attack drill? A scripted attack plays out over ~90 seconds.') && run(startDrill(), 'Drill started')}>
+        ▶ Run 2 AM drill
+      </button>
+      <button type="button" onClick={() => run(stopDrill(), 'Drill stopped')}>■ Stop drill</button>
+    </span>
   );
 }
 
@@ -194,8 +149,8 @@ function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
   };
   return (
     <div className="card">
-      <h2>Tasks {tasks.length > 0 && <span className="muted">({open} open)</span>}</h2>
-      {tasks.length === 0 && <p className="empty">No tasks yet: add the guided steps or your own below.</p>}
+      <h2>What do I do next? {tasks.length > 0 && <span className="muted">({open} open)</span>}</h2>
+      {tasks.length === 0 && <p className="empty">No tasks yet: add your own below.</p>}
       <ul className="checklist">
         {tasks.map(t => (
           <li key={t.id.toString()}>
@@ -226,10 +181,14 @@ function Timeline({ incidentId }: { incidentId: bigint }) {
   const run = useRun();
   const [text, setText] = useState('');
   const rows = events.filter(e => e.incidentId === incidentId).sort((a, b) => (a.id < b.id ? 1 : -1));
-  const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? hex.slice(0, 8);
+  const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? 'Breach Room';
   // Phase changes are stored as "detect -> analyze"; show plain labels.
   const show = (kind: string, t: string) =>
-    kind === 'phase_change' ? t.split(' -> ').map(p => PHASE_LABEL[p] ?? p).join(' → ') : t;
+    kind === 'phase_change'
+      ? t.split(' -> ').map(p => PHASE_LABEL[p] ?? p).join(' → ')
+      : kind === 'scope_change'
+        ? t.replace(/: (\w+)$/, (_, st) => `: ${SCOPE_LABEL[st] ?? st}`)
+        : t;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     run(addTimelineEvent({ incidentId, kind: 'note', text }));
@@ -248,7 +207,7 @@ function Timeline({ incidentId }: { incidentId: bigint }) {
       {rows.length === 0 && <p className="empty">No events yet.</p>}
       <ul className="timeline">
         {rows.map(ev => (
-          <li key={ev.id.toString()}>
+          <li key={ev.id.toString()} className={ev.kind === 'auto' ? 'auto' : undefined}>
             <time>{ev.at.toDate().toLocaleTimeString()}</time> <span className="tag">{KIND_LABEL[ev.kind] ?? ev.kind}</span>{' '}
             {show(ev.kind, ev.text)} <span className="muted">by {nameOf(ev.actor.toHexString())}</span>
           </li>
