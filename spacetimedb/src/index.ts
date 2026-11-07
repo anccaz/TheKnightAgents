@@ -4,11 +4,11 @@ import { schema, table, t, SenderError } from 'spacetimedb/server';
 import { Timestamp } from 'spacetimedb';
 
 // ---------- Enums (kept as strings; validated in reducers) ----------
-export const ROLES = ['admin', 'incident_lead', 'responder', 'legal', 'exec_viewer'] as const;
-export const PHASES = ['detect', 'analyze', 'contain', 'eradicate', 'recover', 'post_incident'] as const;
-export const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
-export const SCOPE_STATUSES = ['encrypted', 'exfiltrated', 'accessed', 'unknown', 'clear'] as const;
-export const FRAUD_STATUSES = ['open', 'frozen', 'dismissed'] as const;
+const ROLES = ['admin', 'incident_lead', 'responder', 'legal', 'exec_viewer'] as const;
+const PHASES = ['detect', 'analyze', 'contain', 'eradicate', 'recover', 'post_incident'] as const;
+const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
+const SCOPE_STATUSES = ['encrypted', 'exfiltrated', 'accessed', 'unknown', 'clear'] as const;
+const FRAUD_STATUSES = ['open', 'frozen', 'dismissed'] as const;
 
 // shortcut: every table is public, so any connected client can read all rows.
 // Lane A: replace with views filtered by role before the demo (Winstead judges security).

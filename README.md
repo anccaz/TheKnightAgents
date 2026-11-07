@@ -16,7 +16,7 @@ Built at HackUTD 2026 for **Winstead PC** (Cyber Incident Response Dashboard), *
    ```bash
    cd spacetimedb && npm install && npm run typecheck
    spacetime login
-   npm run publish:cloud     # or: spacetime start  +  npm run publish:local
+   npm run publish:cloud     # or local: spacetime start --listen-addr 127.0.0.1:3010  +  npm run publish:local
    npm run generate          # writes client/src/module_bindings
    ```
 3. Client:
