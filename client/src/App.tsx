@@ -10,15 +10,14 @@ import FraudPage from './pages/fraud/FraudPage';
 import LegalPage from './pages/legal/LegalPage';
 import AuditPage from './pages/audit/AuditPage';
 
-// Simple state router: no router dependency.
 const PAGES = {
-  incident: { label: 'Incident', Page: IncidentPage },
-  comms: { label: 'Messages', Page: CommsPage },
-  scope: { label: 'What was hit', Page: ScopePage },
-  fraud: { label: 'Fraud alerts', Page: FraudPage },
-  legal: { label: 'Legal deadlines', Page: LegalPage },
-  audit: { label: 'Audit log', Page: AuditPage },
-  access: { label: 'Team & access', Page: AccessPage },
+  incident: { label: 'Incident Command', icon: '⚡', Page: IncidentPage },
+  comms: { label: 'Encrypted Comms', icon: '💬', Page: CommsPage },
+  scope: { label: 'Blast Radius / Scope', icon: '🎯', Page: ScopePage },
+  fraud: { label: 'Fraud Interception', icon: '🛡️', Page: FraudPage },
+  legal: { label: 'SEC / Regulatory Clocks', icon: '⏱️', Page: LegalPage },
+  audit: { label: 'Immutable Audit Log', icon: '📜', Page: AuditPage },
+  access: { label: 'Zero-Trust Directory', icon: '🔑', Page: AccessPage },
 } as const;
 type PageKey = keyof typeof PAGES;
 
@@ -30,48 +29,69 @@ export default function App() {
   const [page, setPage] = useState<PageKey>('incident');
 
   const online = users.filter(u => u.online);
-  // Not a member yet: the only useful screen is access (bootstrap / accept invite).
   const current: PageKey = me ? page : 'access';
   const { Page } = PAGES[current];
 
   return (
     <div className="shell">
       <header className="topbar">
-        <span className="brand">Breach Room</span>
-        {incident ? (
-          <span className="topbar-incident">
-            <strong>{incident.title}</strong>
-            <span className="phase-pill">Phase: {PHASE_LABEL[incident.phase] ?? incident.phase}</span>
-            <SeverityChip severity={incident.severity} />
+        <div className="brand-wrapper">
+          <div className="brand-icon">⬡</div>
+          <span className="brand-title">BreachRoom</span>
+          <span className="brand-badge">MAINCLOUD</span>
+        </div>
+
+        <div className="topbar-center">
+          {incident ? (
+            <div className="incident-pill">
+              <span className="pulse-indicator" />
+              <span>{incident.title}</span>
+              <span style={{ color: 'var(--text-muted)' }}>|</span>
+              <span style={{ color: 'var(--accent-amber)' }}>
+                {PHASE_LABEL[incident.phase] ?? incident.phase}
+              </span>
+              <SeverityChip severity={incident.severity} />
+            </div>
+          ) : (
+            <span style={{ color: 'var(--text-muted)' }}>STANDBY // NO ACTIVE SEV-1 INCIDENT</span>
+          )}
+        </div>
+
+        <div className="topbar-right">
+          <span className="status-tag">
+            <span style={{ color: 'var(--accent-emerald)' }}>●</span>
+            {online.length} Node{online.length !== 1 ? 's' : ''} Online
           </span>
-        ) : (
-          <span className="muted">No active incident</span>
-        )}
-        <span className="topbar-right">
-          <span title={online.map(u => u.name).join(', ')}>● {online.length} online</span>
+
           {me && (
-            <span className="muted">
-              {me.name} ({ROLE_LABEL[me.role] ?? me.role})
+            <span className="status-tag">
+              <strong style={{ color: '#fff' }}>{me.name}</strong>
+              <span style={{ color: 'var(--text-muted)' }}>({ROLE_LABEL[me.role] ?? me.role})</span>
             </span>
           )}
-          <span className={isActive ? 'conn-ok' : 'conn-bad'}>
-            {isActive ? 'Connected' : connectionError ? 'Connection failed' : 'Connecting…'}
+
+          <span className={`status-tag ${isActive ? 'active' : ''}`}>
+            {isActive ? '● Live' : connectionError ? '× Offline' : 'Connecting…'}
           </span>
-        </span>
+        </div>
       </header>
-      <nav className="leftnav" aria-label="Sections">
+
+      <nav className="leftnav" aria-label="Crisis Controls">
+        <div className="nav-section-label">Incident Modules</div>
         {(Object.keys(PAGES) as PageKey[]).map(k => (
           <button
             key={k}
-            className={k === current ? 'nav-item active' : 'nav-item'}
+            className={`nav-item ${k === current ? 'active' : ''}`}
             aria-current={k === current ? 'page' : undefined}
             disabled={!me && k !== 'access'}
             onClick={() => setPage(k)}
           >
-            {PAGES[k].label}
+            <span style={{ fontSize: '13px' }}>{PAGES[k].icon}</span>
+            <span>{PAGES[k].label}</span>
           </button>
         ))}
       </nav>
+
       <main className="main">
         <Page />
       </main>
