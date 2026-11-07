@@ -10,7 +10,7 @@ export default function AccessPage() {
   const [users] = useTable(tables.members);
   const me = useMe();
 
-  if (!me) return <JoinScreen />;
+  if (!me) return <JoinScreen usersCount={users.length} />;
   return (
     <section>
       <h1>Team & access</h1>
@@ -28,9 +28,19 @@ export default function AccessPage() {
   );
 }
 
-function JoinScreen() {
+function JoinScreen({ usersCount }: { usersCount: number }) {
   const { identity } = useSpacetimeDB();
+  const bootstrap = useReducer(reducers.bootstrapAdmin);
+  const run = useRun();
   const hex = identity?.toHexString() ?? '';
+
+  const handleBootstrap = () => {
+    run(
+      bootstrap({ name: 'ancca', email: 'annie@bank.com' }),
+      'Claimed root admin!'
+    );
+  };
+
   return (
     <section className="card form">
       <h1>Join the response team</h1>
@@ -38,10 +48,28 @@ function JoinScreen() {
       <label>
         Your ID <input readOnly value={hex} onFocus={e => e.target.select()} />
       </label>
-      <button className="primary big" type="button" onClick={() => navigator.clipboard?.writeText(hex)} disabled={!hex}>
-        Copy my ID
-      </button>
-      <p className="muted">First admin: the person who published the database runs <code>spacetime call</code> with this ID (see README).</p>
+      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+        <button className="primary big" type="button" onClick={() => navigator.clipboard?.writeText(hex)} disabled={!hex}>
+          Copy my ID
+        </button>
+
+        {usersCount === 0 && (
+          <button
+            className="big"
+            type="button"
+            onClick={handleBootstrap}
+            style={{ backgroundColor: '#16a34a', color: 'white', fontWeight: 600 }}
+          >
+            Become Admin (First User)
+          </button>
+        )}
+      </div>
+
+      <p className="muted">
+        {usersCount === 0
+          ? 'No admin registered yet. Click "Become Admin" to initialize root access.'
+          : 'First admin: the person who published the database runs spacetime call with this ID (see README).'}
+      </p>
     </section>
   );
 }
@@ -91,3 +119,4 @@ function AddMemberForm() {
     </form>
   );
 }
+

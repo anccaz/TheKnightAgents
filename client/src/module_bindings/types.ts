@@ -10,12 +10,9 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-<<<<<<< HEAD
 export const AuditEntries = __t.object("AuditEntries", {});
 export type AuditEntries = __Infer<typeof AuditEntries>;
 
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 export const AuditLog = __t.object("AuditLog", {
   id: __t.u64(),
   at: __t.timestamp(),
@@ -33,12 +30,9 @@ export const Channel = __t.object("Channel", {
 });
 export type Channel = __Infer<typeof Channel>;
 
-<<<<<<< HEAD
 export const Channels = __t.object("Channels", {});
 export type Channels = __Infer<typeof Channels>;
 
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 export const FraudAlert = __t.object("FraudAlert", {
   id: __t.u64(),
   incidentId: __t.u64(),
@@ -51,12 +45,9 @@ export const FraudAlert = __t.object("FraudAlert", {
 });
 export type FraudAlert = __Infer<typeof FraudAlert>;
 
-<<<<<<< HEAD
 export const FraudAlerts = __t.object("FraudAlerts", {});
 export type FraudAlerts = __Infer<typeof FraudAlerts>;
 
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 export const Incident = __t.object("Incident", {
   id: __t.u64(),
   title: __t.string(),
@@ -68,20 +59,8 @@ export const Incident = __t.object("Incident", {
 });
 export type Incident = __Infer<typeof Incident>;
 
-<<<<<<< HEAD
 export const Incidents = __t.object("Incidents", {});
 export type Incidents = __Infer<typeof Incidents>;
-=======
-export const Invite = __t.object("Invite", {
-  code: __t.string(),
-  email: __t.string(),
-  role: __t.string(),
-  createdBy: __t.identity(),
-  used: __t.bool(),
-  createdAt: __t.timestamp(),
-});
-export type Invite = __Infer<typeof Invite>;
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 
 export const LegalClock = __t.object("LegalClock", {
   id: __t.u64(),
@@ -94,15 +73,12 @@ export const LegalClock = __t.object("LegalClock", {
 });
 export type LegalClock = __Infer<typeof LegalClock>;
 
-<<<<<<< HEAD
 export const LegalClocks = __t.object("LegalClocks", {});
 export type LegalClocks = __Infer<typeof LegalClocks>;
 
 export const Members = __t.object("Members", {});
 export type Members = __Infer<typeof Members>;
 
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 export const Message = __t.object("Message", {
   id: __t.u64(),
   channelId: __t.u64(),
@@ -112,18 +88,15 @@ export const Message = __t.object("Message", {
 });
 export type Message = __Infer<typeof Message>;
 
-<<<<<<< HEAD
 export const Messages = __t.object("Messages", {});
 export type Messages = __Infer<typeof Messages>;
 
 export const Owner = __t.object("Owner", {
-  id: __t.u8(),
+  id: __t.u32(),
   identity: __t.identity(),
 });
 export type Owner = __Infer<typeof Owner>;
 
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 export const ScopeItem = __t.object("ScopeItem", {
   id: __t.u64(),
   incidentId: __t.u64(),
@@ -137,12 +110,9 @@ export const ScopeItem = __t.object("ScopeItem", {
 });
 export type ScopeItem = __Infer<typeof ScopeItem>;
 
-<<<<<<< HEAD
 export const ScopeItems = __t.object("ScopeItems", {});
 export type ScopeItems = __Infer<typeof ScopeItems>;
 
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 export const Task = __t.object("Task", {
   id: __t.u64(),
   incidentId: __t.u64(),
@@ -153,12 +123,9 @@ export const Task = __t.object("Task", {
 });
 export type Task = __Infer<typeof Task>;
 
-<<<<<<< HEAD
 export const Tasks = __t.object("Tasks", {});
 export type Tasks = __Infer<typeof Tasks>;
 
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 export const TimelineEvent = __t.object("TimelineEvent", {
   id: __t.u64(),
   incidentId: __t.u64(),
@@ -169,12 +136,9 @@ export const TimelineEvent = __t.object("TimelineEvent", {
 });
 export type TimelineEvent = __Infer<typeof TimelineEvent>;
 
-<<<<<<< HEAD
 export const TimelineEvents = __t.object("TimelineEvents", {});
 export type TimelineEvents = __Infer<typeof TimelineEvents>;
 
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 export const User = __t.object("User", {
   identity: __t.identity(),
   name: __t.string(),
