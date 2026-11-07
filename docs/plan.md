@@ -26,8 +26,8 @@ Skip: MongoDB / Tiger Data (Spacetime is the DB), Vultr (Spacetime hosts).
 
 | # | Requirement | Feature | Owner |
 |---|---|---|---|
-| 01 | Secure & isolated | Hosted on Spacetime Maincloud, **outside** the bank network (out-of-band). Invite-only, no public signup. Append-only audit log. Pitch line: "assume the attacker owns AD, email and Slack, so we don't use any of them." | A |
-| 02 | Access control | Admin invites users; roles: `admin`, `incident_lead`, `responder`, `legal`, `exec_viewer`. Role checks inside reducers (server-side), not just hidden buttons. | A |
+| 01 | Secure & isolated | Hosted on Spacetime Maincloud, **outside** the bank network (out-of-band). Members added by ID only, no signup and no shared invite codes. Tables private, read through role-filtered views. Append-only audit log. Pitch line: "assume the attacker owns AD, email and Slack, so we don't use any of them." | A |
+| 02 | Access control | Admin adds users by their ID; roles: `admin`, `incident_lead`, `responder`, `legal`, `exec_viewer`. Role checks inside reducers (server-side), not just hidden buttons. | A |
 | 03 | Incident documentation | Incident record following NIST SP 800-61 phases: Detect → Analyze → Contain → Eradicate → Recover → Post-incident. Fields: severity, type, detected_at, systems, IOCs, actions taken. Immutable timeline. Live status for everyone. | B |
 | 04 | Scope definitions | Scope board: data assets and Nessie customers/accounts, each tagged `encrypted` / `exfiltrated` / `accessed` / `unknown` / `clear`. Live counters ("48,210 records exposed"). | C |
 | 05 | Real-time comms | Channels per workstream (#containment, #legal, #exec). Messages, tasks and status changes all stream via Spacetime subscriptions. | B |
@@ -97,7 +97,7 @@ React (Vite + TS) ──subscribe/call reducers──▶ SpacetimeDB module (TS)
 ## Demo script (3 min)
 
 1. **0:00** "It's 2 AM. Ransomware just hit First Avon Bank. Email and Slack are compromised." Open Breach Room on a laptop that's off-network.
-2. **0:20** Admin invites the legal lead → they appear live with a restricted view.
+2. **0:20** Admin adds the legal lead by ID → they appear live with a restricted view.
 3. **0:40** Lead declares the incident and logs IOCs → timeline updates on both screens instantly *(Spacetime)*.
 4. **1:10** Responder marks the core-banking DB `exfiltrated` → scope board pulls affected customers from **Nessie**, counter jumps, **legal clocks start**.
 5. **1:50** Fraud alert: suspicious transfer from a compromised account → freeze.

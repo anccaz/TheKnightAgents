@@ -6,13 +6,11 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
-import AcceptInviteReducer from "../accept_invite_reducer";
+import AddMemberReducer from "../add_member_reducer";
 import AddTaskReducer from "../add_task_reducer";
 import AddTimelineEventReducer from "../add_timeline_event_reducer";
-import BootstrapAdminReducer from "../bootstrap_admin_reducer";
 import CompleteLegalClockReducer from "../complete_legal_clock_reducer";
 import CreateIncidentReducer from "../create_incident_reducer";
-import CreateInviteReducer from "../create_invite_reducer";
 import RaiseFraudAlertReducer from "../raise_fraud_alert_reducer";
 import SendMessageReducer from "../send_message_reducer";
 import SetFraudAlertStatusReducer from "../set_fraud_alert_status_reducer";
@@ -22,13 +20,11 @@ import StartLegalClockReducer from "../start_legal_clock_reducer";
 import ToggleTaskReducer from "../toggle_task_reducer";
 import UpsertScopeItemReducer from "../upsert_scope_item_reducer";
 
-export type AcceptInviteParams = __Infer<typeof AcceptInviteReducer>;
+export type AddMemberParams = __Infer<typeof AddMemberReducer>;
 export type AddTaskParams = __Infer<typeof AddTaskReducer>;
 export type AddTimelineEventParams = __Infer<typeof AddTimelineEventReducer>;
-export type BootstrapAdminParams = __Infer<typeof BootstrapAdminReducer>;
 export type CompleteLegalClockParams = __Infer<typeof CompleteLegalClockReducer>;
 export type CreateIncidentParams = __Infer<typeof CreateIncidentReducer>;
-export type CreateInviteParams = __Infer<typeof CreateInviteReducer>;
 export type RaiseFraudAlertParams = __Infer<typeof RaiseFraudAlertReducer>;
 export type SendMessageParams = __Infer<typeof SendMessageReducer>;
 export type SetFraudAlertStatusParams = __Infer<typeof SetFraudAlertStatusReducer>;

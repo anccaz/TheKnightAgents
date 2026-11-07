@@ -3,8 +3,8 @@ import { useTable } from 'spacetimedb/react';
 import { tables } from '../../module_bindings';
 
 export default function AuditPage() {
-  const [log] = useTable(tables.auditLog);
-  const [users] = useTable(tables.user);
+  const [log] = useTable(tables.auditEntries);
+  const [users] = useTable(tables.members);
   const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? hex.slice(0, 8);
   const rows = [...log].sort((a, b) => (a.id < b.id ? 1 : -1));
   return (

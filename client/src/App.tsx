@@ -24,7 +24,7 @@ type PageKey = keyof typeof PAGES;
 
 export default function App() {
   const { isActive, connectionError } = useSpacetimeDB();
-  const [users] = useTable(tables.user);
+  const [users] = useTable(tables.members);
   const me = useMe();
   const incident = useCurrentIncident();
   const [page, setPage] = useState<PageKey>('incident');

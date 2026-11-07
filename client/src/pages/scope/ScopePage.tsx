@@ -7,7 +7,7 @@ import { Chip, NoIncident, SCOPE_LABEL, SCOPE_STATUSES, useCurrentIncident } fro
 
 export default function ScopePage() {
   const incident = useCurrentIncident();
-  const [allItems] = useTable(tables.scopeItem);
+  const [allItems] = useTable(tables.scopeItems);
   const upsertScopeItem = useReducer(reducers.upsertScopeItem);
   const run = useRun();
   const [form, setForm] = useState({ label: '', assetRef: '', assetType: 'system', status: 'unknown', records: '0' });

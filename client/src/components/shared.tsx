@@ -35,13 +35,13 @@ export const ROLE_LABEL: Record<string, string> = {
 /** The signed-in member row, or undefined if this identity has not joined yet. */
 export function useMe() {
   const { identity } = useSpacetimeDB();
-  const [users] = useTable(tables.user);
+  const [users] = useTable(tables.members);
   return identity ? users.find(u => u.identity.isEqual(identity)) : undefined;
 }
 
 // shortcut: "current incident" = newest incident; add an incident picker if two run at once.
 export function useCurrentIncident() {
-  const [incidents] = useTable(tables.incident);
+  const [incidents] = useTable(tables.incidents);
   return incidents.reduce<(typeof incidents)[number] | undefined>(
     (best, i) => (!best || i.id > best.id ? i : best),
     undefined

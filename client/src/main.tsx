@@ -7,7 +7,7 @@ import App from './App';
 import './styles.css';
 
 const TOKEN_KEY = 'breach-room:auth-token';
-const uri = import.meta.env.VITE_SPACETIME_URI ?? 'ws://localhost:3000';
+const uri = import.meta.env.VITE_SPACETIME_URI ?? 'ws://127.0.0.1:3010';
 const dbName = import.meta.env.VITE_SPACETIME_DB ?? 'breach-room';
 
 function loadToken(): string | undefined {
@@ -38,17 +38,16 @@ const connectionBuilder = DbConnection.builder()
     conn
       .subscriptionBuilder()
       .subscribe([
-        tables.user,
-        tables.invite,
-        tables.incident,
-        tables.timelineEvent,
-        tables.scopeItem,
-        tables.task,
-        tables.channel,
-        tables.message,
-        tables.legalClock,
-        tables.fraudAlert,
-        tables.auditLog,
+        tables.members,
+        tables.incidents,
+        tables.timelineEvents,
+        tables.scopeItems,
+        tables.tasks,
+        tables.channels,
+        tables.messages,
+        tables.legalClocks,
+        tables.fraudAlerts,
+        tables.auditEntries,
       ]);
   })
   .onConnectError((_ctx, err) => console.error('SpacetimeDB connect error', err))

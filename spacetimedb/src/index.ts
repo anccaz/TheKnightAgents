@@ -9,11 +9,20 @@ const PHASES = ['detect', 'analyze', 'contain', 'eradicate', 'recover', 'post_in
 const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 const SCOPE_STATUSES = ['encrypted', 'exfiltrated', 'accessed', 'unknown', 'clear'] as const;
 const FRAUD_STATUSES = ['open', 'frozen', 'dismissed'] as const;
+const PRIVILEGED_ROLES = ['admin', 'incident_lead', 'legal'];
 
-// shortcut: every table is public, so any connected client can read all rows.
-// Lane A: replace with views filtered by role before the demo (Winstead judges security).
+// Every table is private. Clients read only through the views at the bottom,
+// which return nothing to non-members and filter by role.
+const owner = table(
+  {},
+  {
+    id: t.u8().primaryKey(), // always 0: single row
+    identity: t.identity(),
+  }
+);
+
 const user = table(
-  { public: true },
+  {},
   {
     identity: t.identity().primaryKey(),
     name: t.string(),
@@ -24,20 +33,8 @@ const user = table(
   }
 );
 
-const invite = table(
-  { public: true },
-  {
-    code: t.string().primaryKey(),
-    email: t.string(),
-    role: t.string(),
-    createdBy: t.identity(),
-    used: t.bool(),
-    createdAt: t.timestamp(),
-  }
-);
-
 const incident = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     title: t.string(),
@@ -50,7 +47,7 @@ const incident = table(
 );
 
 const timelineEvent = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     incidentId: t.u64().index(),
@@ -62,7 +59,7 @@ const timelineEvent = table(
 );
 
 const scopeItem = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     incidentId: t.u64().index(),
@@ -77,7 +74,7 @@ const scopeItem = table(
 );
 
 const task = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     incidentId: t.u64().index(),
@@ -89,7 +86,7 @@ const task = table(
 );
 
 const channel = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     incidentId: t.u64().index(),
@@ -99,7 +96,7 @@ const channel = table(
 );
 
 const message = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     channelId: t.u64().index(),
@@ -110,7 +107,7 @@ const message = table(
 );
 
 const legalClock = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     incidentId: t.u64().index(),
@@ -123,7 +120,7 @@ const legalClock = table(
 );
 
 const fraudAlert = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     incidentId: t.u64().index(),
@@ -137,7 +134,7 @@ const fraudAlert = table(
 );
 
 const auditLog = table(
-  { public: true },
+  {},
   {
     id: t.u64().primaryKey().autoInc(),
     at: t.timestamp(),
@@ -148,8 +145,8 @@ const auditLog = table(
 );
 
 const db = schema({
+  owner,
   user,
-  invite,
   incident,
   timelineEvent,
   scopeItem,
@@ -171,10 +168,16 @@ function oneOf(value: string, allowed: readonly string[], what: string) {
 
 function requireRole(ctx: Ctx, ...roles: string[]) {
   const me = ctx.db.user.identity.find(ctx.sender);
-  if (!me) throw new SenderError('Not a member. Ask an admin for an invite.');
+  if (!me) throw new SenderError('Not a member. Send your ID to an admin.');
   if (roles.length && !roles.includes(me.role) && me.role !== 'admin')
     throw new SenderError(`Requires role: ${roles.join(' or ')}`);
   return me;
+}
+
+function requireIncident(ctx: Ctx, incidentId: bigint) {
+  const inc = ctx.db.incident.id.find(incidentId);
+  if (!inc) throw new SenderError('No such incident');
+  return inc;
 }
 
 function audit(ctx: Ctx, action: string, detail: string) {
@@ -188,6 +191,11 @@ function timeline(ctx: Ctx, incidentId: bigint, kind: string, text: string) {
 const WRITERS = ['incident_lead', 'responder'];
 
 // ---------- Lifecycle ----------
+// Runs once on first publish; the sender is whoever published (the CLI identity).
+export const init = db.init(ctx => {
+  ctx.db.owner.insert({ id: 0, identity: ctx.sender });
+});
+
 export const onConnect = db.clientConnected(ctx => {
   const me = ctx.db.user.identity.find(ctx.sender);
   if (me) ctx.db.user.identity.update({ ...me, online: true });
@@ -199,36 +207,29 @@ export const onDisconnect = db.clientDisconnected(ctx => {
 });
 
 // ---------- Access control (Lane A) ----------
-/** First person to call this on an empty database becomes admin. */
-export const bootstrapAdmin = db.reducer({ name: t.string(), email: t.string() }, (ctx, { name, email }) => {
-  if (ctx.db.user.count() > 0n) throw new SenderError('Already bootstrapped');
-  ctx.db.user.insert({ identity: ctx.sender, name, email, role: 'admin', online: true, createdAt: ctx.timestamp });
-  audit(ctx, 'bootstrap_admin', email);
-});
-
-export const createInvite = db.reducer({ email: t.string(), role: t.string() }, (ctx, { email, role }) => {
-  requireRole(ctx, 'admin');
-  oneOf(role, ROLES, 'role');
-  const bytes = ctx.random.fill(new Uint8Array(9));
-  const code = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
-  ctx.db.invite.insert({ code, email, role, createdBy: ctx.sender, used: false, createdAt: ctx.timestamp });
-  audit(ctx, 'create_invite', `${email} as ${role}`);
-});
-
-export const acceptInvite = db.reducer({ code: t.string(), name: t.string() }, (ctx, { code, name }) => {
-  const inv = ctx.db.invite.code.find(code);
-  if (!inv || inv.used) throw new SenderError('Invalid or used invite');
-  if (ctx.db.user.identity.find(ctx.sender)) throw new SenderError('Already a member');
-  ctx.db.invite.code.update({ ...inv, used: true });
-  ctx.db.user.insert({ identity: ctx.sender, name, email: inv.email, role: inv.role, online: true, createdAt: ctx.timestamp });
-  audit(ctx, 'accept_invite', inv.email);
-});
+/**
+ * Admins (or the database owner, for the very first admin via `spacetime call`)
+ * add a member by the ID the new person sees on their join screen. No shared secret.
+ */
+export const addMember = db.reducer(
+  { target: t.identity(), name: t.string(), email: t.string(), role: t.string() },
+  (ctx, { target, name, email, role }) => {
+    const isOwner = ctx.db.owner.id.find(0)?.identity.isEqual(ctx.sender) ?? false;
+    if (!isOwner) requireRole(ctx, 'admin');
+    oneOf(role, ROLES, 'role');
+    if (ctx.db.user.identity.find(target)) throw new SenderError('Already a member');
+    ctx.db.user.insert({ identity: target, name, email, role, online: false, createdAt: ctx.timestamp });
+    audit(ctx, 'add_member', `${email} as ${role}`);
+  }
+);
 
 export const setRole = db.reducer({ target: t.identity(), role: t.string() }, (ctx, { target, role }) => {
   requireRole(ctx, 'admin');
   oneOf(role, ROLES, 'role');
   const u = ctx.db.user.identity.find(target);
   if (!u) throw new SenderError('No such user');
+  if (u.role === 'admin' && role !== 'admin' && [...ctx.db.user.iter()].filter(x => x.role === 'admin').length === 1)
+    throw new SenderError('Cannot remove the last admin');
   ctx.db.user.identity.update({ ...u, role });
   audit(ctx, 'set_role', `${u.email} -> ${role}`);
 });
@@ -252,8 +253,7 @@ export const createIncident = db.reducer(
 export const setPhase = db.reducer({ incidentId: t.u64(), phase: t.string() }, (ctx, { incidentId, phase }) => {
   requireRole(ctx, 'incident_lead');
   oneOf(phase, PHASES, 'phase');
-  const inc = ctx.db.incident.id.find(incidentId);
-  if (!inc) throw new SenderError('No such incident');
+  const inc = requireIncident(ctx, incidentId);
   ctx.db.incident.id.update({ ...inc, phase });
   timeline(ctx, incidentId, 'phase_change', `${inc.phase} -> ${phase}`);
   audit(ctx, 'set_phase', `${incidentId}: ${phase}`);
@@ -263,6 +263,7 @@ export const addTimelineEvent = db.reducer(
   { incidentId: t.u64(), kind: t.string(), text: t.string() },
   (ctx, { incidentId, kind, text }) => {
     requireRole(ctx, ...WRITERS);
+    requireIncident(ctx, incidentId);
     timeline(ctx, incidentId, kind, text);
   }
 );
@@ -271,6 +272,7 @@ export const addTask = db.reducer(
   { incidentId: t.u64(), title: t.string(), phase: t.string() },
   (ctx, { incidentId, title, phase }) => {
     requireRole(ctx, ...WRITERS);
+    requireIncident(ctx, incidentId);
     oneOf(phase, PHASES, 'phase');
     ctx.db.task.insert({ id: 0n, incidentId, title, phase, done: false, createdBy: ctx.sender });
   }
@@ -288,8 +290,7 @@ export const sendMessage = db.reducer({ channelId: t.u64(), text: t.string() }, 
   const me = requireRole(ctx);
   const ch = ctx.db.channel.id.find(channelId);
   if (!ch) throw new SenderError('No such channel');
-  if (ch.privileged && !['legal', 'incident_lead', 'admin'].includes(me.role))
-    throw new SenderError('Privileged channel');
+  if (ch.privileged && !PRIVILEGED_ROLES.includes(me.role)) throw new SenderError('Privileged channel');
   if (!text.trim()) throw new SenderError('Empty message');
   ctx.db.message.insert({ id: 0n, channelId, sender: ctx.sender, text, sentAt: ctx.timestamp });
 });
@@ -306,6 +307,7 @@ export const upsertScopeItem = db.reducer(
   },
   (ctx, args) => {
     requireRole(ctx, ...WRITERS);
+    requireIncident(ctx, args.incidentId);
     oneOf(args.status, SCOPE_STATUSES, 'scope status');
     const existing = [...ctx.db.scopeItem.incidentId.filter(args.incidentId)].find(s => s.assetRef === args.assetRef);
     const row = { ...args, updatedAt: ctx.timestamp, updatedBy: ctx.sender };
@@ -320,6 +322,7 @@ export const raiseFraudAlert = db.reducer(
   { incidentId: t.u64(), accountRef: t.string(), transferRef: t.string(), amountCents: t.u64(), reason: t.string() },
   (ctx, args) => {
     requireRole(ctx, ...WRITERS);
+    requireIncident(ctx, args.incidentId);
     ctx.db.fraudAlert.insert({ ...args, id: 0n, status: 'open', createdAt: ctx.timestamp });
   }
 );
@@ -339,6 +342,7 @@ export const startLegalClock = db.reducer(
   { incidentId: t.u64(), regime: t.string(), label: t.string(), hours: t.u32() },
   (ctx, { incidentId, regime, label, hours }) => {
     requireRole(ctx, 'legal', 'incident_lead');
+    requireIncident(ctx, incidentId);
     const deadlineAt = new Timestamp(ctx.timestamp.microsSinceUnixEpoch + BigInt(hours) * 3_600_000_000n);
     ctx.db.legalClock.insert({ id: 0n, incidentId, regime, label, startedAt: ctx.timestamp, deadlineAt, done: false });
     timeline(ctx, incidentId, 'action', `Legal clock started: ${label}`);
@@ -352,3 +356,42 @@ export const completeLegalClock = db.reducer({ clockId: t.u64() }, (ctx, { clock
   ctx.db.legalClock.id.update({ ...c, done: true });
   audit(ctx, 'complete_legal_clock', c.label);
 });
+
+// ---------- Views: the only way clients read data ----------
+// Each view runs per caller: non-members get [], privileged rows need a privileged role.
+type VCtx = { sender: Ctx['sender']; db: { user: { identity: { find(i: Ctx['sender']): { role: string } | null } } } };
+const roleOf = (ctx: VCtx) => ctx.db.user.identity.find(ctx.sender)?.role;
+
+export const members = db.view({ name: 'members', public: true }, t.array(user.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.user.iter()] : []
+);
+export const incidents = db.view({ name: 'incidents', public: true }, t.array(incident.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.incident.iter()] : []
+);
+export const timelineEvents = db.view({ name: 'timelineEvents', public: true }, t.array(timelineEvent.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.timelineEvent.iter()] : []
+);
+export const scopeItems = db.view({ name: 'scopeItems', public: true }, t.array(scopeItem.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.scopeItem.iter()] : []
+);
+export const tasks = db.view({ name: 'tasks', public: true }, t.array(task.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.task.iter()] : []
+);
+export const channels = db.view({ name: 'channels', public: true }, t.array(channel.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.channel.iter()] : []
+);
+export const messages = db.view({ name: 'messages', public: true }, t.array(message.rowType), ctx => {
+  const role = roleOf(ctx);
+  if (!role) return [];
+  if (PRIVILEGED_ROLES.includes(role)) return [...ctx.db.message.iter()];
+  return [...ctx.db.message.iter()].filter(m => !ctx.db.channel.id.find(m.channelId)?.privileged);
+});
+export const legalClocks = db.view({ name: 'legalClocks', public: true }, t.array(legalClock.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.legalClock.iter()] : []
+);
+export const fraudAlerts = db.view({ name: 'fraudAlerts', public: true }, t.array(fraudAlert.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.fraudAlert.iter()] : []
+);
+export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
+  roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []
+);

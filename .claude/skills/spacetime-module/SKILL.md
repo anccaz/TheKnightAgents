@@ -16,7 +16,7 @@ The module lives in `spacetimedb/src/index.ts`. It is the **data contract** for 
 import { schema, table, t, SenderError } from 'spacetimedb/server';
 import { Timestamp } from 'spacetimedb';
 
-const thing = table({ public: true }, {
+const thing = table({}, {   // private: clients read via views only
   id: t.u64().primaryKey().autoInc(),   // insert with id: 0n
   incidentId: t.u64().index(),          // gives ctx.db.thing.incidentId.filter(x)
   owner: t.identity(),
@@ -45,4 +45,8 @@ export const onConnect = db.clientConnected(ctx => {});
 - Security-relevant actions call `audit(ctx, action, detail)`. Incident-visible actions call `timeline(...)`.
 - Validate enum strings with `oneOf(value, LIST, 'what')` against the constants at the top of the file.
 - Never trust client-sent identities for authorization; use `ctx.sender`.
-- Known gap: all tables are `public: true`. Hardening with role-filtered views is Lane A's job before the demo.
+- **Tables are private.** Clients read only through the views at the bottom of the module (`members`, `incidents`, `messages`, ...). A new table needs a matching view that returns `[]` to non-members.
+- Views: `db.view({ name: 'things', public: true }, t.array(thing.rowType), ctx => roleOf(ctx) ? [...ctx.db.thing.iter()] : [])`.
+- CLI reducer names are snake_case: `spacetime call breach-room add_member ...`.
+- Run `npm test` (vitest + `spacetimedb/server/test-utils`) after touching roles or views; add a case to `test/roles.test.ts` for new permission rules.
+- Only `export` reducers, views and lifecycle hooks: exporting anything else (e.g. a const array) makes publish fail.

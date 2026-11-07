@@ -136,7 +136,7 @@ function NextSteps({ phase }: { phase: string }) {
 }
 
 function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
-  const [allTasks] = useTable(tables.task);
+  const [allTasks] = useTable(tables.tasks);
   const addTask = useReducer(reducers.addTask);
   const toggleTask = useReducer(reducers.toggleTask);
   const run = useRun();
@@ -175,8 +175,8 @@ function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
 }
 
 function Timeline({ incidentId }: { incidentId: bigint }) {
-  const [events] = useTable(tables.timelineEvent);
-  const [users] = useTable(tables.user);
+  const [events] = useTable(tables.timelineEvents);
+  const [users] = useTable(tables.members);
   const addTimelineEvent = useReducer(reducers.addTimelineEvent);
   const run = useRun();
   const [text, setText] = useState('');

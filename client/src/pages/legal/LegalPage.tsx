@@ -23,7 +23,7 @@ function remaining(ms: number) {
 
 export default function LegalPage() {
   const incident = useCurrentIncident();
-  const [allClocks] = useTable(tables.legalClock);
+  const [allClocks] = useTable(tables.legalClocks);
   const startLegalClock = useReducer(reducers.startLegalClock);
   const completeLegalClock = useReducer(reducers.completeLegalClock);
   const run = useRun();

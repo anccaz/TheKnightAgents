@@ -7,9 +7,9 @@ import { NoIncident, useCurrentIncident } from '../../components/shared';
 
 export default function CommsPage() {
   const incident = useCurrentIncident();
-  const [allChannels] = useTable(tables.channel);
-  const [allMessages] = useTable(tables.message);
-  const [users] = useTable(tables.user);
+  const [allChannels] = useTable(tables.channels);
+  const [allMessages] = useTable(tables.messages);
+  const [users] = useTable(tables.members);
   const sendMessage = useReducer(reducers.sendMessage);
   const run = useRun();
   const [selected, setSelected] = useState<bigint | null>(null);

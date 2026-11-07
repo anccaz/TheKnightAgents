@@ -2,7 +2,7 @@
 // Seeds "First Avon Bank" into Nessie. Usage: node scripts/seed-nessie.mjs [--reset] [--count N] [--dry-run]
 //
 // ASSUMED (Nessie docs were unreachable when written; verify at the Capital One table):
-//  - Base http://api.nessieisreal.com, auth via ?key=
+//  - Base https://api.nessieisreal.com, auth via ?key=
 //  - POST /merchants {name, category, address, geocode}
 //  - POST /customers {first_name, last_name, address{street_number, street_name, city, state, zip}}
 //  - POST /customers/{id}/accounts {type: Checking|Savings, nickname, rewards, balance}
@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path';
 import { generateBank, isSuspicious, toCents } from './lib.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const BASE = process.env.NESSIE_BASE_URL ?? 'http://api.nessieisreal.com';
+const BASE = process.env.NESSIE_BASE_URL ?? 'https://api.nessieisreal.com';
 const SLEEP_MS = 100;
 
 const args = process.argv.slice(2);

@@ -17,7 +17,7 @@ Winstead judges **ease of use under stress** almost as heavily as security. The 
 
 ## Data
 - All data comes from SpacetimeDB via generated bindings in `src/module_bindings/` (never edit them; run `npm run generate` in `spacetimedb/`).
-- Read with `useTable` from `spacetimedb/react`; write with `useReducer(reducers.x)` or `conn.reducers.x(...)`. No REST calls for app state.
+- Read with `useTable(tables.<view>)` from `spacetimedb/react`. Only views exist on the client (`members`, `incidents`, `timelineEvents`, `scopeItems`, `tasks`, `channels`, `messages`, `legalClocks`, `fraudAlerts`, `auditEntries`); they already filter by the viewer's role. Write with `useReducer(reducers.x)` or `conn.reducers.x(...)`. No REST calls for app state.
 - `u64` ids are `bigint`; timestamps are `Timestamp` (`.toDate()`).
 - Show reducer errors (SenderError text) in a visible toast; never fail silently.
 

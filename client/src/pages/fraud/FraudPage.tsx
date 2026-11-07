@@ -11,7 +11,7 @@ const money = (cents: bigint) =>
 
 export default function FraudPage() {
   const incident = useCurrentIncident();
-  const [allAlerts] = useTable(tables.fraudAlert);
+  const [allAlerts] = useTable(tables.fraudAlerts);
   const setFraudAlertStatus = useReducer(reducers.setFraudAlertStatus);
   const run = useRun();
 

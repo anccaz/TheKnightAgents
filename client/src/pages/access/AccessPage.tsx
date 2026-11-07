@@ -1,20 +1,20 @@
-// Lane A owner: access control (bootstrap admin, invites, accept invite).
+// Lane A owner: access control (join by ID, admins add members).
 import { useState, type FormEvent } from 'react';
-import { useReducer, useTable } from 'spacetimedb/react';
+import { useReducer, useSpacetimeDB, useTable } from 'spacetimedb/react';
+import { Identity } from 'spacetimedb';
 import { reducers, tables } from '../../module_bindings';
 import { useRun } from '../../components/Toast';
 import { ROLES, ROLE_LABEL, useMe } from '../../components/shared';
 
 export default function AccessPage() {
-  const [users] = useTable(tables.user);
+  const [users] = useTable(tables.members);
   const me = useMe();
 
-  if (users.length === 0) return <BootstrapForm />;
-  if (!me) return <AcceptInviteForm />;
+  if (!me) return <JoinScreen />;
   return (
     <section>
       <h1>Team & access</h1>
-      {me.role === 'admin' ? <InviteForm /> : <p className="muted">Only admins can invite people.</p>}
+      {me.role === 'admin' ? <AddMemberForm /> : <p className="muted">Only admins can add people.</p>}
       <h2>Members</h2>
       <ul className="list">
         {users.map(u => (
@@ -28,91 +28,66 @@ export default function AccessPage() {
   );
 }
 
-function BootstrapForm() {
-  const bootstrapAdmin = useReducer(reducers.bootstrapAdmin);
-  const run = useRun();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    run(bootstrapAdmin({ name, email }), 'You are the admin');
-  };
+function JoinScreen() {
+  const { identity } = useSpacetimeDB();
+  const hex = identity?.toHexString() ?? '';
   return (
-    <form className="card form" onSubmit={submit}>
-      <h1>Set up Breach Room</h1>
-      <p>No one has joined yet. The first person becomes the admin.</p>
-      <label>
-        Your name <input required value={name} onChange={e => setName(e.target.value)} />
-      </label>
-      <label>
-        Work email <input required type="email" value={email} onChange={e => setEmail(e.target.value)} />
-      </label>
-      <button className="primary big" type="submit">Become admin</button>
-    </form>
-  );
-}
-
-function AcceptInviteForm() {
-  const acceptInvite = useReducer(reducers.acceptInvite);
-  const run = useRun();
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    run(acceptInvite({ code: code.trim(), name }), 'Welcome to the team');
-  };
-  return (
-    <form className="card form" onSubmit={submit}>
+    <section className="card form">
       <h1>Join the response team</h1>
-      <p>Paste the invite code your admin sent you.</p>
+      <p>Send this ID to your admin over a channel you trust (phone, in person). They add you, and this page opens up by itself.</p>
       <label>
-        Invite code <input required value={code} onChange={e => setCode(e.target.value)} />
+        Your ID <input readOnly value={hex} onFocus={e => e.target.select()} />
       </label>
-      <label>
-        Your name <input required value={name} onChange={e => setName(e.target.value)} />
-      </label>
-      <button className="primary big" type="submit">Join</button>
-    </form>
+      <button className="primary big" type="button" onClick={() => navigator.clipboard?.writeText(hex)} disabled={!hex}>
+        Copy my ID
+      </button>
+      <p className="muted">First admin: the person who published the database runs <code>spacetime call</code> with this ID (see README).</p>
+    </section>
   );
 }
 
-function InviteForm() {
-  const createInvite = useReducer(reducers.createInvite);
-  const [invites] = useTable(tables.invite);
+function AddMemberForm() {
+  const addMember = useReducer(reducers.addMember);
   const run = useRun();
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<string>('responder');
+  const [form, setForm] = useState({ id: '', name: '', email: '', role: 'responder' });
+  const [error, setError] = useState('');
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    run(createInvite({ email, role }), `Invite created for ${email}`);
-    setEmail('');
+    let target: Identity;
+    try {
+      target = Identity.fromString(form.id.trim());
+    } catch {
+      setError('That ID is not valid. Ask them to copy it again.');
+      return;
+    }
+    setError('');
+    run(addMember({ target, name: form.name, email: form.email, role: form.role }), `${form.name} added`);
+    setForm({ id: '', name: '', email: '', role: 'responder' });
   };
+
   return (
-    <>
-      <form className="card form" onSubmit={submit}>
-        <h2>Invite someone</h2>
-        <label>
-          Email <input required type="email" value={email} onChange={e => setEmail(e.target.value)} />
-        </label>
-        <label>
-          Role
-          <select value={role} onChange={e => setRole(e.target.value)}>
-            {ROLES.map(r => (
-              <option key={r} value={r}>{ROLE_LABEL[r]}</option>
-            ))}
-          </select>
-        </label>
-        <button className="primary big" type="submit">Create invite</button>
-      </form>
-      <h2>Invites</h2>
-      {invites.length === 0 && <p className="empty">No invites yet: create one above.</p>}
-      <ul className="list">
-        {invites.map(i => (
-          <li key={i.code}>
-            {i.email} · {ROLE_LABEL[i.role] ?? i.role} · code <code>{i.code}</code> · {i.used ? 'Used' : 'Not used yet'}
-          </li>
-        ))}
-      </ul>
-    </>
+    <form className="card form" onSubmit={submit}>
+      <h2>Add someone</h2>
+      <label>
+        Their ID <input required value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} />
+      </label>
+      {error && <p className="warn" role="alert">{error}</p>}
+      <label>
+        Name <input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+      </label>
+      <label>
+        Email <input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+      </label>
+      <label>
+        Role
+        <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
+          {ROLES.map(r => (
+            <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+          ))}
+        </select>
+      </label>
+      <button className="primary big" type="submit">Add member</button>
+    </form>
   );
 }

@@ -27,12 +27,17 @@ Built at HackUTD 2026 for **Winstead PC** (Cyber Incident Response Dashboard), *
    ```bash
    node scripts/seed-nessie.mjs --reset
    ```
-5. First person to open the app clicks **Become admin** (`bootstrapAdmin`), then invites the team.
+5. **First admin:** open the app, copy **Your ID** from the join screen, then the person who published runs:
+   ```bash
+   spacetime call breach-room add_member '{"__identity__":"0x<ID>"}' '"Your Name"' '"you@example.com"' '"admin"'
+   ```
+   (add `--server http://127.0.0.1:3010` for local). After that, admins add teammates by ID on **Team & access**.
+6. Module tests: `cd spacetimedb && npm test` (role checks and views).
 
 ## Lanes
 | Lane | Owner | Owns | Reducers |
 |---|---|---|---|
-| A | _name_ | Access control, roles, audit log, security hardening (role-filtered views) | `bootstrapAdmin` `createInvite` `acceptInvite` `setRole` |
+| A | _name_ | Access control, roles, audit log, views (who can read what) | `addMember` `setRole` |
 | B | _name_ | Incident record, phases, timeline, tasks, comms | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `sendMessage` |
 | C | _name_ | Nessie seed, scope board, fraud watch | `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` |
 | D | _name_ | Legal clocks, Gemini drafts, Devpost, pitch | `startLegalClock` `completeLegalClock` |
@@ -52,8 +57,8 @@ Tick boxes as you go (edit this file, commit, push). Deadlines: **initial Devpos
 - [ ] Install the Spacetime CLI, `spacetime login`, redeem `HACKUTD2026`
 - [ ] `npm run publish:cloud` then `npm run generate`; commit `client/src/module_bindings/` and push **ASAP**
 - [ ] Fix any client typecheck errors left after bindings (`npx tsc --noEmit` in `client/`)
-- [ ] Test the invite flow in two browsers: bootstrap admin → invite → accept → role shows up
-- [ ] Replace `public: true` tables with role-filtered views (e.g. `exec_viewer` can't read #legal, only admin reads `auditLog`)
+- [x] Role-filtered views: tables are private; non-members see nothing, `exec_viewer` can't read #legal, only admin reads the audit log
+- [ ] Test add-by-ID in two browsers: second browser copies its ID → admin adds it → page opens with the right role
 - [ ] Write 3 bullet points for the security pitch: out-of-band hosting, server-side role checks, append-only audit log
 
 ### Lane B: incident + comms

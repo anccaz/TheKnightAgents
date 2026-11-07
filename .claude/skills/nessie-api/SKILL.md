@@ -5,7 +5,7 @@ description: How Breach Room uses Capital One's Nessie mock-banking API (seeding
 
 # Nessie (Capital One hackathon API)
 
-- Base URL: `http://api.nessieisreal.com` (verify at the Capital One table or https://api.nessieisreal.com/documentation, docs may have moved).
+- Base URL: `https://api.nessieisreal.com` (verify at the Capital One table or https://api.nessieisreal.com/documentation, docs may have moved).
 - Auth: `?key=NESSIE_API_KEY` query param. The key lives in `.env` only; **never** ship it in the client bundle.
 - Common endpoints (verify against the docs before relying on them):
   - `GET/POST /customers`, `GET /customers/{id}/accounts`, `POST /customers/{id}/accounts`
