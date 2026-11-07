@@ -34,11 +34,21 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+<<<<<<< HEAD
 import AddMemberReducer from "./add_member_reducer";
 import AddTaskReducer from "./add_task_reducer";
 import AddTimelineEventReducer from "./add_timeline_event_reducer";
 import CompleteLegalClockReducer from "./complete_legal_clock_reducer";
 import CreateIncidentReducer from "./create_incident_reducer";
+=======
+import AcceptInviteReducer from "./accept_invite_reducer";
+import AddTaskReducer from "./add_task_reducer";
+import AddTimelineEventReducer from "./add_timeline_event_reducer";
+import BootstrapAdminReducer from "./bootstrap_admin_reducer";
+import CompleteLegalClockReducer from "./complete_legal_clock_reducer";
+import CreateIncidentReducer from "./create_incident_reducer";
+import CreateInviteReducer from "./create_invite_reducer";
+>>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 import RaiseFraudAlertReducer from "./raise_fraud_alert_reducer";
 import SendMessageReducer from "./send_message_reducer";
 import SetFraudAlertStatusReducer from "./set_fraud_alert_status_reducer";
@@ -51,6 +61,7 @@ import UpsertScopeItemReducer from "./upsert_scope_item_reducer";
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+<<<<<<< HEAD
 import AuditEntriesRow from "./audit_entries_table";
 import ChannelsRow from "./channels_table";
 import FraudAlertsRow from "./fraud_alerts_table";
@@ -61,11 +72,25 @@ import MessagesRow from "./messages_table";
 import ScopeItemsRow from "./scope_items_table";
 import TasksRow from "./tasks_table";
 import TimelineEventsRow from "./timeline_events_table";
+=======
+import AuditLogRow from "./audit_log_table";
+import ChannelRow from "./channel_table";
+import FraudAlertRow from "./fraud_alert_table";
+import IncidentRow from "./incident_table";
+import InviteRow from "./invite_table";
+import LegalClockRow from "./legal_clock_table";
+import MessageRow from "./message_table";
+import ScopeItemRow from "./scope_item_table";
+import TaskRow from "./task_table";
+import TimelineEventRow from "./timeline_event_table";
+import UserRow from "./user_table";
+>>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 
 /** Type-only namespace exports for generated type groups. */
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+<<<<<<< HEAD
   auditEntries: __table({
     name: 'auditEntries',
     indexes: [
@@ -136,15 +161,169 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, TimelineEventsRow),
+=======
+  auditLog: __table({
+    name: 'audit_log',
+    indexes: [
+      { accessor: 'id', name: 'audit_log_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'audit_log_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AuditLogRow),
+  channel: __table({
+    name: 'channel',
+    indexes: [
+      { accessor: 'id', name: 'channel_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'incidentId', name: 'channel_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+    ],
+    constraints: [
+      { name: 'channel_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ChannelRow),
+  fraudAlert: __table({
+    name: 'fraud_alert',
+    indexes: [
+      { accessor: 'id', name: 'fraud_alert_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'incidentId', name: 'fraud_alert_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+    ],
+    constraints: [
+      { name: 'fraud_alert_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, FraudAlertRow),
+  incident: __table({
+    name: 'incident',
+    indexes: [
+      { accessor: 'id', name: 'incident_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'incident_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, IncidentRow),
+  invite: __table({
+    name: 'invite',
+    indexes: [
+      { accessor: 'code', name: 'invite_code_idx_btree', algorithm: 'btree', columns: [
+        'code',
+      ] },
+    ],
+    constraints: [
+      { name: 'invite_code_key', constraint: 'unique', columns: ['code'] },
+    ],
+  }, InviteRow),
+  legalClock: __table({
+    name: 'legal_clock',
+    indexes: [
+      { accessor: 'id', name: 'legal_clock_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'incidentId', name: 'legal_clock_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+    ],
+    constraints: [
+      { name: 'legal_clock_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, LegalClockRow),
+  message: __table({
+    name: 'message',
+    indexes: [
+      { accessor: 'channelId', name: 'message_channel_id_idx_btree', algorithm: 'btree', columns: [
+        'channelId',
+      ] },
+      { accessor: 'id', name: 'message_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'message_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MessageRow),
+  scopeItem: __table({
+    name: 'scope_item',
+    indexes: [
+      { accessor: 'id', name: 'scope_item_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'incidentId', name: 'scope_item_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+    ],
+    constraints: [
+      { name: 'scope_item_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ScopeItemRow),
+  task: __table({
+    name: 'task',
+    indexes: [
+      { accessor: 'id', name: 'task_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'incidentId', name: 'task_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+    ],
+    constraints: [
+      { name: 'task_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, TaskRow),
+  timelineEvent: __table({
+    name: 'timeline_event',
+    indexes: [
+      { accessor: 'id', name: 'timeline_event_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'incidentId', name: 'timeline_event_incident_id_idx_btree', algorithm: 'btree', columns: [
+        'incidentId',
+      ] },
+    ],
+    constraints: [
+      { name: 'timeline_event_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, TimelineEventRow),
+  user: __table({
+    name: 'user',
+    indexes: [
+      { accessor: 'identity', name: 'user_identity_idx_btree', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+    ],
+    constraints: [
+      { name: 'user_identity_key', constraint: 'unique', columns: ['identity'] },
+    ],
+  }, UserRow),
+>>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+<<<<<<< HEAD
   __reducerSchema("add_member", AddMemberReducer),
   __reducerSchema("add_task", AddTaskReducer),
   __reducerSchema("add_timeline_event", AddTimelineEventReducer),
   __reducerSchema("complete_legal_clock", CompleteLegalClockReducer),
   __reducerSchema("create_incident", CreateIncidentReducer),
+=======
+  __reducerSchema("accept_invite", AcceptInviteReducer),
+  __reducerSchema("add_task", AddTaskReducer),
+  __reducerSchema("add_timeline_event", AddTimelineEventReducer),
+  __reducerSchema("bootstrap_admin", BootstrapAdminReducer),
+  __reducerSchema("complete_legal_clock", CompleteLegalClockReducer),
+  __reducerSchema("create_incident", CreateIncidentReducer),
+  __reducerSchema("create_invite", CreateInviteReducer),
+>>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
   __reducerSchema("raise_fraud_alert", RaiseFraudAlertReducer),
   __reducerSchema("send_message", SendMessageReducer),
   __reducerSchema("set_fraud_alert_status", SetFraudAlertStatusReducer),

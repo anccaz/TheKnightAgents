@@ -9,6 +9,7 @@ const PHASES = ['detect', 'analyze', 'contain', 'eradicate', 'recover', 'post_in
 const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 const SCOPE_STATUSES = ['encrypted', 'exfiltrated', 'accessed', 'unknown', 'clear'] as const;
 const FRAUD_STATUSES = ['open', 'frozen', 'dismissed'] as const;
+<<<<<<< HEAD
 const PRIVILEGED_ROLES = ['admin', 'incident_lead', 'legal'];
 
 // Every table is private. Clients read only through the views at the bottom,
@@ -20,6 +21,8 @@ const owner = table(
     identity: t.identity(),
   }
 );
+=======
+>>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 
 const user = table(
   {},
