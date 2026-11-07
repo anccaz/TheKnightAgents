@@ -62,10 +62,10 @@ Tick boxes as you go (edit this file, commit, push). Deadlines: **initial Devpos
 - [ ] Write 3 bullet points for the security pitch: out-of-band hosting, server-side role checks, append-only audit log
 
 ### Lane B: incident + comms
-- [ ] Two browsers: declare incident → 4 channels appear → timeline updates live on both
-- [ ] Fill the "What do I do next?" checklist for each of the 6 NIST phases with real steps
-- [ ] Phase stepper, tasks and timeline: make the main path one obvious click each
-- [ ] Comms: auto-scroll, sender names, privileged banner on #legal
+- [x] Two browsers: declare incident → 4 channels appear → timeline updates live on both
+- [x] Fill the "What do I do next?" checklist for each of the 6 NIST phases with real steps
+- [x] Phase stepper, tasks and timeline: make the main path one obvious click each
+- [x] Comms: auto-scroll, sender names, privileged banner on #legal
 - [ ] Own the 2 AM demo walkthrough (declare → scope → fraud → legal) and rehearse it
 
 ### Lane C: Nessie + scope + fraud

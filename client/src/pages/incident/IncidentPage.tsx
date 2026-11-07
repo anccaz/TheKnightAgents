@@ -3,40 +3,48 @@ import { useState, type FormEvent } from 'react';
 import { useReducer, useTable } from 'spacetimedb/react';
 import { reducers, tables } from '../../module_bindings';
 import { useRun } from '../../components/Toast';
-import { PHASES, PHASE_LABEL, SEVERITIES, useCurrentIncident } from '../../components/shared';
+import { LEADS, PHASES, PHASE_LABEL, SEVERITIES, WRITERS, can, useCurrentIncident, useMe } from '../../components/shared';
 
-// Hardcoded guidance per phase (NIST 800-61 style). Lane B: refine wording with the bank's playbook.
+// Guided steps per phase (NIST SP 800-61 lifecycle, bank flavour). Legal timings: Lane D verifies.
 const NEXT_STEPS: Record<string, string[]> = {
   detect: [
-    'Confirm the alert is real (not a false alarm).',
-    'Write down what you saw and when, in the timeline.',
-    'Call the incident lead.',
+    'Confirm the alert is real, not a false alarm',
+    'Write what you saw and when in the timeline',
+    'Page the incident lead and open this war room',
   ],
   analyze: [
-    'List every system and account that may be affected (What was hit).',
-    'Save logs before anything is rebooted.',
-    'Ask Legal to start the deadline clocks.',
+    'List every affected system and customer in What was hit',
+    'Copy logs and memory before anything is rebooted',
+    'Ask Legal to start deadline clocks (bank regulator: 36 hours)',
   ],
   contain: [
-    'Disconnect affected machines from the network. Do not turn them off.',
-    'Reset passwords for exposed accounts.',
-    'Freeze suspicious transfers in Fraud alerts.',
+    'Unplug affected machines from the network, do not power them off',
+    'Reset passwords and keys for exposed accounts',
+    'Freeze suspicious transfers in Fraud alerts',
   ],
   eradicate: [
-    'Remove the malware or attacker access.',
-    'Patch the hole they came in through.',
-    'Check that no backdoors are left.',
+    'Remove the malware and every attacker login',
+    'Patch the hole they came in through',
+    'Scan again to confirm no backdoors are left',
   ],
   recover: [
-    'Restore from clean backups.',
-    'Watch restored systems closely for 48 hours.',
-    'Tell customers what happened, with Legal approval.',
+    'Restore systems from clean, tested backups',
+    'Watch restored systems closely for 48 hours',
+    'Send customer notices once Legal approves',
   ],
   post_incident: [
-    'Hold a blameless review meeting.',
-    'Write down what to do better next time.',
-    'Close all legal deadlines with proof of filing.',
+    'Hold a blameless review within two weeks',
+    'Write down what to change next time',
+    'Mark every legal deadline as filed',
   ],
+};
+
+const KIND_LABEL: Record<string, string> = {
+  note: 'Note',
+  phase_change: 'Phase',
+  scope_change: 'What was hit',
+  action: 'Action',
+  ioc: 'Clue',
 };
 
 export default function IncidentPage() {
@@ -47,7 +55,7 @@ export default function IncidentPage() {
       <h1>{incident.title}</h1>
       <PhaseStepper incidentId={incident.id} phase={incident.phase} />
       <div className="grid2">
-        <NextSteps phase={incident.phase} />
+        <NextSteps incidentId={incident.id} phase={incident.phase} />
         <Tasks incidentId={incident.id} phase={incident.phase} />
       </div>
       <Timeline incidentId={incident.id} />
@@ -56,11 +64,16 @@ export default function IncidentPage() {
 }
 
 function DeclareForm() {
+  const me = useMe();
   const createIncident = useReducer(reducers.createIncident);
   const run = useRun();
   const [title, setTitle] = useState('');
   const [severity, setSeverity] = useState<string>('high');
   const [kind, setKind] = useState('ransomware');
+
+  if (!can(me, LEADS))
+    return <p className="empty">No incident yet. Only an incident lead can declare one: call yours now.</p>;
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     run(createIncident({ title, severity, kind }), 'Incident declared');
@@ -96,52 +109,84 @@ function DeclareForm() {
 }
 
 function PhaseStepper({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+  const me = useMe();
   const setPhase = useReducer(reducers.setPhase);
   const run = useRun();
   const idx = PHASES.indexOf(phase as (typeof PHASES)[number]);
   const next = PHASES[idx + 1];
-  const go = (p: string) => run(setPhase({ incidentId, phase: p }), `Phase: ${PHASE_LABEL[p]}`);
+  const lead = can(me, LEADS);
+  const go = (p: string, i: number) => {
+    if (i < idx && !window.confirm(`Go back to ${PHASE_LABEL[p]}?`)) return;
+    run(setPhase({ incidentId, phase: p }), `Phase: ${PHASE_LABEL[p]}`);
+  };
   return (
     <div className="stepper">
       <ol>
         {PHASES.map((p, i) => (
           <li key={p} className={i < idx ? 'step done' : i === idx ? 'step current' : 'step'}>
-            <button onClick={() => go(p)} aria-current={i === idx ? 'step' : undefined}>
+            <button onClick={() => go(p, i)} disabled={!lead || i === idx} aria-current={i === idx ? 'step' : undefined}>
               {i < idx ? '✓ ' : i === idx ? '▶ ' : ''}
               {PHASE_LABEL[p]}
             </button>
           </li>
         ))}
       </ol>
-      {next && (
-        <button className="primary big" onClick={() => go(next)}>
-          Move to {PHASE_LABEL[next]}
+      {next && lead && (
+        <button className="primary big" onClick={() => go(next, idx + 1)}>
+          Done with {PHASE_LABEL[phase]}: move to {PHASE_LABEL[next]}
+        </button>
+      )}
+      {!lead && <span className="muted">Only the incident lead moves phases.</span>}
+    </div>
+  );
+}
+
+function NextSteps({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+  const me = useMe();
+  const [allTasks] = useTable(tables.tasks);
+  const addTask = useReducer(reducers.addTask);
+  const run = useRun();
+  const steps = NEXT_STEPS[phase] ?? [];
+  const taskFor = (s: string) => allTasks.find(t => t.incidentId === incidentId && t.title === s);
+  const missing = steps.filter(s => !taskFor(s));
+  const addAll = () => {
+    for (const title of missing) run(addTask({ incidentId, title, phase }));
+  };
+  return (
+    <div className="card">
+      <h2>What do I do next?</h2>
+      <ol>
+        {steps.map(s => {
+          const t = taskFor(s);
+          return (
+            <li key={s}>
+              {s} {t && <span className="muted">{t.done ? '(✓ done)' : '(in tasks)'}</span>}
+            </li>
+          );
+        })}
+      </ol>
+      {missing.length > 0 && can(me, WRITERS) && (
+        <button className="primary" onClick={addAll}>
+          Add {missing.length === steps.length ? 'these steps' : `${missing.length} remaining`} to tasks
         </button>
       )}
     </div>
   );
 }
 
-function NextSteps({ phase }: { phase: string }) {
-  return (
-    <div className="card">
-      <h2>What do I do next?</h2>
-      <ol>
-        {(NEXT_STEPS[phase] ?? []).map(s => (
-          <li key={s}>{s}</li>
-        ))}
-      </ol>
-    </div>
-  );
-}
-
 function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+  const me = useMe();
   const [allTasks] = useTable(tables.tasks);
   const addTask = useReducer(reducers.addTask);
   const toggleTask = useReducer(reducers.toggleTask);
   const run = useRun();
   const [title, setTitle] = useState('');
-  const tasks = allTasks.filter(t => t.incidentId === incidentId);
+  const writer = can(me, WRITERS);
+  // Current phase first, then open before done.
+  const tasks = allTasks
+    .filter(t => t.incidentId === incidentId)
+    .sort((a, b) => Number(b.phase === phase) - Number(a.phase === phase) || Number(a.done) - Number(b.done) || (a.id < b.id ? -1 : 1));
+  const open = tasks.filter(t => !t.done).length;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     run(addTask({ incidentId, title, phase }));
@@ -149,32 +194,32 @@ function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
   };
   return (
     <div className="card">
-      <h2>Tasks</h2>
-      {tasks.length === 0 && <p className="empty">No tasks yet: add one below.</p>}
+      <h2>Tasks {tasks.length > 0 && <span className="muted">({open} open)</span>}</h2>
+      {tasks.length === 0 && <p className="empty">No tasks yet: add the guided steps or your own below.</p>}
       <ul className="checklist">
         {tasks.map(t => (
           <li key={t.id.toString()}>
             <label>
-              <input type="checkbox" checked={t.done} onChange={() => run(toggleTask({ taskId: t.id }))} />
-              {t.title}{' '}
-              <span className="muted">
-                ({PHASE_LABEL[t.phase] ?? t.phase}
-                {t.done ? ', done' : ''})
-              </span>
+              <input type="checkbox" checked={t.done} disabled={!writer} onChange={() => run(toggleTask({ taskId: t.id }))} />
+              <span style={t.done ? { textDecoration: 'line-through' } : undefined}>{t.title}</span>{' '}
+              {t.phase !== phase && <span className="muted">({PHASE_LABEL[t.phase] ?? t.phase})</span>}
             </label>
           </li>
         ))}
       </ul>
-      <form className="inline" onSubmit={submit}>
-        <label className="sr-only" htmlFor="new-task">New task</label>
-        <input id="new-task" required value={title} onChange={e => setTitle(e.target.value)} placeholder="New task" />
-        <button type="submit">Add task</button>
-      </form>
+      {writer && (
+        <form className="inline" onSubmit={submit}>
+          <label className="sr-only" htmlFor="new-task">New task</label>
+          <input id="new-task" required value={title} onChange={e => setTitle(e.target.value)} placeholder="New task" />
+          <button type="submit">Add task</button>
+        </form>
+      )}
     </div>
   );
 }
 
 function Timeline({ incidentId }: { incidentId: bigint }) {
+  const me = useMe();
   const [events] = useTable(tables.timelineEvents);
   const [users] = useTable(tables.members);
   const addTimelineEvent = useReducer(reducers.addTimelineEvent);
@@ -182,6 +227,9 @@ function Timeline({ incidentId }: { incidentId: bigint }) {
   const [text, setText] = useState('');
   const rows = events.filter(e => e.incidentId === incidentId).sort((a, b) => (a.id < b.id ? 1 : -1));
   const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? hex.slice(0, 8);
+  // Phase changes are stored as "detect -> analyze"; show plain labels.
+  const show = (kind: string, t: string) =>
+    kind === 'phase_change' ? t.split(' -> ').map(p => PHASE_LABEL[p] ?? p).join(' → ') : t;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     run(addTimelineEvent({ incidentId, kind: 'note', text }));
@@ -190,17 +238,19 @@ function Timeline({ incidentId }: { incidentId: bigint }) {
   return (
     <div className="card">
       <h2>Timeline</h2>
-      <form className="inline" onSubmit={submit}>
-        <label className="sr-only" htmlFor="new-note">Add a note</label>
-        <input id="new-note" required value={text} onChange={e => setText(e.target.value)} placeholder="What just happened?" />
-        <button type="submit">Add note</button>
-      </form>
+      {can(me, WRITERS) && (
+        <form className="inline" onSubmit={submit}>
+          <label className="sr-only" htmlFor="new-note">Add a note</label>
+          <input id="new-note" required value={text} onChange={e => setText(e.target.value)} placeholder="What just happened?" />
+          <button type="submit">Add note</button>
+        </form>
+      )}
       {rows.length === 0 && <p className="empty">No events yet.</p>}
       <ul className="timeline">
         {rows.map(ev => (
           <li key={ev.id.toString()}>
-            <time>{ev.at.toDate().toLocaleTimeString()}</time> <span className="tag">{ev.kind}</span> {ev.text}{' '}
-            <span className="muted">by {nameOf(ev.actor.toHexString())}</span>
+            <time>{ev.at.toDate().toLocaleTimeString()}</time> <span className="tag">{KIND_LABEL[ev.kind] ?? ev.kind}</span>{' '}
+            {show(ev.kind, ev.text)} <span className="muted">by {nameOf(ev.actor.toHexString())}</span>
           </li>
         ))}
       </ul>

@@ -39,6 +39,12 @@ export function useMe() {
   return identity ? users.find(u => u.identity.isEqual(identity)) : undefined;
 }
 
+// Mirrors the server's requireRole lists so we hide buttons a role can't use (server still enforces).
+export const LEADS = ['admin', 'incident_lead'];
+export const WRITERS = ['admin', 'incident_lead', 'responder'];
+export const PRIVILEGED = ['admin', 'incident_lead', 'legal'];
+export const can = (me: { role: string } | undefined, roles: string[]) => !!me && roles.includes(me.role);
+
 // shortcut: "current incident" = newest incident; add an incident picker if two run at once.
 export function useCurrentIncident() {
   const [incidents] = useTable(tables.incidents);
