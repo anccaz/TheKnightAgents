@@ -154,4 +154,4 @@ docs/                   plan and demo script
 - The technical id `breach-room` (database name, package names) is kept from the project's earlier name so existing databases and logins keep working.
 
 ## Team
-Annie, Navya and Sameeraa, at HackUTD 2026, for the Winstead PC, Spacetime and Capital One tracks.
+Annie, Navya, Kavya and Sameeraa, at HackUTD 2026, for the Winstead PC, Spacetime and Capital One tracks.
