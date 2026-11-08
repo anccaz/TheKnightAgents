@@ -49,10 +49,13 @@ let fakeId = 0;
 
 async function api(method, path, body) {
   if (dryRun) return `dry-${++fakeId}`;
-  const sep = path.includes('?') ? '&' : '?';
-  const res = await fetch(`${BASE}${path}${sep}key=${encodeURIComponent(KEY)}`, {
+  const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json', 
+      Accept: 'application/json',
+      'api-key': KEY 
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
