@@ -366,17 +366,21 @@ function Details({ incident }: { incident: Incident }) {
       <div className="[&>div>span]:basis-full">
         <NessieImport incidentId={incident.id} />
       </div>
-      <Fold title="Incident record">
-        <IncidentRecord incident={incident} />
-      </Fold>
+      <div className="grid items-start gap-3 sm:grid-cols-2">
+        <Fold title="Incident record">
+          <IncidentRecord incident={incident} />
+        </Fold>
+        <Fold title="Nessie bank data">
+          <div className="[&_.lg\:grid-cols-4]:grid-cols-2! [&_.lg\:grid-cols-2]:grid-cols-1!">
+            <NessiePanel incidentId={incident.id} />
+          </div>
+        </Fold>
+      </div>
       {at >= PHASES.indexOf('analyze') && (
         <Fold title="What was hit">
           <Scope incidentId={incident.id} />
         </Fold>
       )}
-      <Fold title="Nessie bank data">
-        <NessiePanel incidentId={incident.id} />
-      </Fold>
     </section>
   );
 }
