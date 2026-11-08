@@ -1,6 +1,6 @@
 ---
 name: nessie-api
-description: How Breach Room uses Capital One's Nessie mock-banking API (seeding customers/accounts/transfers, reading them for scope and fraud watch). Use when writing the seed script, scope board data loading, or fraud detection.
+description: How Knight Agent uses Capital One's Nessie mock-banking API (seeding customers/accounts/transfers, reading them for scope and fraud watch). Use when writing the seed script, scope board data loading, or fraud detection.
 ---
 
 # Nessie (Capital One hackathon API)
@@ -14,7 +14,7 @@ description: How Breach Room uses Capital One's Nessie mock-banking API (seeding
   - `DELETE /data?type=Customers|Accounts|...` wipes your key's data (seed script reset).
 - Amounts are dollars (numbers), not cents; convert to cents (`u64`) before writing to SpacetimeDB.
 
-## How Breach Room uses it
+## How Knight Agent uses it
 1. `scripts/seed-nessie.mjs` creates "First Avon Bank": ~200 customers with accounts, purchases and transfers, plus a few planted suspicious transfers (new payee, large amount, 2-4 AM).
 2. The scope board marks Nessie customers/accounts as compromised via `upsertScopeItem` (`assetType: 'customer' | 'account'`, `assetRef: <Nessie _id>`).
 3. Fraud watch reads transfers for compromised accounts and calls `raiseFraudAlert`. "Freeze" is simulated in SpacetimeDB (Nessie has no freeze endpoint as far as we know).

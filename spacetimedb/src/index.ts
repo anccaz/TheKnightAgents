@@ -1,4 +1,4 @@
-// Breach Room: SpacetimeDB module. This file IS the data contract.
+// Knight Agent: SpacetimeDB module. This file IS the data contract.
 // Only Lane A edits table definitions; others ask A for new fields.
 import { schema, table, t, SenderError, ScheduleAt } from 'spacetimedb/server';
 import { Timestamp, TimeDuration } from 'spacetimedb';

@@ -1,6 +1,6 @@
 ---
 name: spacetime-module
-description: How to add or change tables and reducers in the Breach Room SpacetimeDB module (spacetimedb/src/index.ts), using the SpacetimeDB v2 TypeScript API. Use before touching the module, adding a field, writing a reducer, or regenerating client bindings.
+description: How to add or change tables and reducers in the Knight Agent SpacetimeDB module (spacetimedb/src/index.ts), using the SpacetimeDB v2 TypeScript API. Use before touching the module, adding a field, writing a reducer, or regenerating client bindings.
 ---
 
 # SpacetimeDB module (v2 TypeScript API)

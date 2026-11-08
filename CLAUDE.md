@@ -1,4 +1,4 @@
-# Breach Room (TheKnightAgents) — HackUTD 2026
+# Knight Agent (TheKnightAgents) — HackUTD 2026
 
 Out-of-band cyber incident command center for a bank. Tracks: Winstead (incident dashboard), Spacetime (real-time backend), Capital One (Nessie). Full plan: docs/plan.md.
 
