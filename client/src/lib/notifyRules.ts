@@ -1,4 +1,4 @@
-// State breach-notification rules used by the notification map.
+// State breach-notification rules used by the notice priority chart.
 // Lane D: VERIFY every rule against current statutes before the demo. Not legal advice.
 export type StateRule = {
   name: string;

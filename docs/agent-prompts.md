@@ -34,7 +34,7 @@ Stack and layout:
 - spacetimedb/test/*.test.ts = vitest tests using spacetimedb/server/test-utils (run: cd spacetimedb && npm test).
 - client/ = Vite + React 18 + TypeScript, Tailwind v4 + shadcn "base-nova" (built on @base-ui/react, NOT Radix:
   read src/components/ui/* props before using). Import with "@/". Icons: lucide-react.
-  3 pages only: src/pages/incident (record, phases, tasks, what was hit, fraud), src/pages/feed (notification map,
+  3 pages only: src/pages/incident (record, phases, tasks, what was hit, fraud), src/pages/feed (notice priority chart,
   deadlines, merged chat/timeline/security feed), src/pages/team (join by ID, add member, roles, security events).
   Shell: src/App.tsx. Notice priority chart: src/components/NotifyPriorityChart.tsx (bubble chart: x = time left, y = people affected, color = customers vs authorities). State rules:
   src/lib/notifyRules.ts. Background: React Bits GradientASCII (src/components/GradientASCII.jsx) - do not
@@ -102,10 +102,10 @@ Out of scope: changing to 3 roles (team decided to skip), UI redesign.
 
 ---
 
-## Lane B: incident, live feed, notification map, demo
+## Lane B: incident, live feed, notice priority chart, demo
 
 ```text
-You own Lane B: the Incident page, the Live Feed page, the notification map UI, and the demo.
+You own Lane B: the Incident page, the Live Feed page, the notice priority chart, and the demo.
 Files: client/src/pages/incident/IncidentPage.tsx, client/src/pages/feed/FeedPage.tsx,
 client/src/components/NotifyPriorityChart.tsx, README demo section, docs/demo-script.md (new).
 You may add the backend pieces for task 1 (coordinate with Lane A: tell them which table you added).
@@ -186,7 +186,7 @@ Tasks, in order:
    - spacetimedb/src/index.ts LEGAL_RULES: bank regulator 36h (OCC/Fed/FDIC computer-security incident rule),
      SEC 8-K 4 business days (material incidents, public companies), Texas AG/customer clocks.
    Cite sources in comments. Keep "verify before relying" wording in the UI.
-3. Gemini "Draft notice": per state on the notification map, a button that drafts the customer notice letter
+3. Gemini "Draft notice": per state in the notice queue (NotifyPriorityChart), a button that drafts the customer notice letter
    using that state's affected count, what was stolen, incident date, and required content. The API key must
    NOT be in the client: either a SpacetimeDB procedure making an HTTP call (check spacetimedb/server procedures
    + http support in v2.14) with the key from module environment, or a tiny local Node endpoint the client calls.
@@ -194,6 +194,6 @@ Tasks, in order:
    notifyStatus). Human approves before "sent".
 4. Register the GoDaddy domain (code MLHUTD84) and point it at the deployed client (e.g. Vercel/Netlify static
    build of client/ with VITE_SPACETIME_URI=Maincloud).
-5. Slides (5-6): problem, live drill, notification map, security model, Spacetime architecture, Nessie data flow.
+5. Slides (5-6): problem, live drill, notice priority chart, security model, Spacetime architecture, Nessie data flow.
    Then the DEV writing-challenge post after final submission (no sponsor-confidential challenge text).
 ```

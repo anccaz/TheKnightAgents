@@ -1,4 +1,4 @@
-// Live Feed: notification map, legal deadlines, and one merged stream of chat, timeline and audit.
+// Live Feed: notice priority chart, legal deadlines, and one merged stream of chat, timeline and audit.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useReducer, useTable } from 'spacetimedb/react';
 import { Lock, Send, Hash, CheckCircle2, AlertTriangle, Clock, Plus, ChevronDown } from 'lucide-react';
