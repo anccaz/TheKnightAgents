@@ -2,7 +2,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { Identity } from 'spacetimedb';
 import { useProcedure, useReducer, useTable } from 'spacetimedb/react';
-import { BarChart3, Check, CircleHelp, Download, Eye, Lock, Play, Radar, ShieldCheck, Snowflake, Square, ThumbsUp, UserCheck, Zap, type LucideIcon } from 'lucide-react';
+import { BarChart3, Check, FilePlus, CircleHelp, Download, Eye, Lock, Play, Radar, ShieldCheck, Snowflake, Square, ThumbsUp, UserCheck, Zap, type LucideIcon } from 'lucide-react';
 import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import AfterActionSummary from '@/components/AfterActionSummary';
@@ -47,8 +47,12 @@ const money = (cents: bigint) => `$${(cents / 100n).toLocaleString()}.${(cents %
 
 export default function IncidentPage() {
   const incident = useCurrentIncident();
+  const me = useMe();
   const [showSummary, setShowSummary] = useState(false);
+  // "New incident": show the declare form over this one. Once a newer incident exists, this id no longer matches and it closes.
+  const [freshFrom, setFreshFrom] = useState<bigint | null>(null);
   if (!incident) return <DeclareForm />;
+  if (freshFrom === incident.id) return <DeclareForm onCancel={() => setFreshFrom(null)} />;
   const summary = incident.phase === 'post_incident' || showSummary;
   // Sections appear as the incident moves on, so each phase only shows what it needs.
   const at = PHASES.indexOf(incident.phase as (typeof PHASES)[number]);
@@ -64,6 +68,11 @@ export default function IncidentPage() {
           </div>
           <span className="flex flex-wrap gap-2">
             <DrillControls />
+            {can(me, LEADS) && (
+              <Button type="button" variant="outline" onClick={() => setFreshFrom(incident.id)}>
+                <FilePlus /> New incident
+              </Button>
+            )}
             {incident.phase !== 'post_incident' && (
               <Button type="button" variant="outline" aria-pressed={showSummary} onClick={() => setShowSummary(v => !v)}>
                 <BarChart3 /> {showSummary ? 'Hide summary' : 'Summary'}
@@ -74,6 +83,7 @@ export default function IncidentPage() {
         <PhaseStepper incidentId={incident.id} phase={incident.phase} />
       </section>
       <Detections incidentId={incident.id} />
+      <NessiePanel incidentId={incident.id} />
       {summary && <AfterActionSummary incident={incident} />}
       <div className="grid gap-6 lg:grid-cols-2">
         <IncidentRecord incident={incident} />
@@ -115,7 +125,7 @@ function Pick({ id, label, value, items, onChange, disabled }: { id?: string; la
   );
 }
 
-function DeclareForm() {
+function DeclareForm({ onCancel }: { onCancel?: () => void }) {
   const me = useMe();
   const createIncident = useReducer(reducers.createIncident);
   const run = useRun();
@@ -132,8 +142,12 @@ function DeclareForm() {
   };
   return (
     <form className="glass mx-auto flex max-w-xl flex-col gap-4 p-6" onSubmit={submit}>
-      <h1 className="text-2xl font-bold text-white">No incident yet</h1>
-      <p className="text-muted-foreground">Something wrong? Declare an incident so the whole team sees it.</p>
+      <h1 className="text-2xl font-bold text-white">{onCancel ? 'Start a new incident' : 'No incident yet'}</h1>
+      <p className="text-muted-foreground">
+        {onCancel
+          ? 'Starts fresh at Detect. The current incident stays in the record and the audit log.'
+          : 'Something wrong? Declare an incident so the whole team sees it.'}
+      </p>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="inc-title">What is happening?</Label>
         <Input id="inc-title" required value={title} onChange={e => setTitle(e.target.value)} placeholder="Ransomware on branch servers" />
@@ -150,6 +164,11 @@ function DeclareForm() {
       </div>
       <Button type="submit" size="lg" className="h-12 text-base font-bold">Declare incident</Button>
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">Practising? <DrillControls /></div>
+      {onCancel && (
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Back to the current incident
+        </Button>
+      )}
     </form>
   );
 }
@@ -349,6 +368,85 @@ function NessieImport({ incidentId }: { incidentId: bigint }) {
             : "Loads the bank's customers by state and scans their withdrawals and bills for fraud."}
       </span>
     </div>
+  );
+}
+
+/** What the Nessie import brought in, as pictures: who is affected per state, how much of the bank was checked, what was flagged. */
+function NessiePanel({ incidentId }: { incidentId: bigint }) {
+  const [cursors] = useTable(tables.nessieCursors);
+  const [states] = useTable(tables.stateImpacts);
+  const [scope] = useTable(tables.scopeItems);
+  const [alerts] = useTable(tables.fraudAlerts);
+  const cur = cursors.find(c => c.incidentId === incidentId);
+  if (!cur) return null; // only after the first "Import from Nessie"
+  const customers = scope.find(s => s.incidentId === incidentId && s.assetRef === 'nessie-customers')?.recordsCount ?? 0n;
+  const byState = states.filter(s => s.incidentId === incidentId && s.records > 0n).sort((a, b) => Number(b.records - a.records));
+  const max = byState.reduce((m, s) => (s.records > m ? s.records : m), 1n);
+  const flagged = alerts.filter(a => a.incidentId === incidentId && /^(withdrawal|bill):/.test(a.transferRef)).sort((a, b) => Number(b.amountCents - a.amountCents));
+  const flaggedCents = flagged.reduce((n, a) => n + a.amountCents, 0n);
+  const frozen = flagged.filter(a => a.status === 'frozen').length;
+  // The server checks accounts in order and wraps around; `offset` is where the next click starts (0 = a full pass is done).
+  const passPct = cur.total ? Math.round(((cur.offset === 0 ? cur.total : cur.offset) / cur.total) * 100) : 0;
+  const stat = (label: string, value: string, sub?: string) => (
+    <div className="rounded-lg border border-border bg-muted/30 p-3">
+      <div className="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">{label}</div>
+      <div className="mt-1 font-mono text-2xl font-bold tabular-nums text-white">{value}</div>
+      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
+    </div>
+  );
+  return (
+    <Panel title="Bank data from Nessie (Capital One)">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {stat('Customers affected', customers.toLocaleString(), `${byState.length} states`)}
+        {stat('Accounts in the bank', cur.total.toLocaleString(), `last read ${cur.at.toDate().toLocaleTimeString()}`)}
+        {stat('Suspicious transactions', flagged.length.toString(), `${frozen} frozen`)}
+        {stat('Money flagged', `$${(flaggedCents / 100n).toLocaleString()}`)}
+      </div>
+      <div className="flex flex-col gap-1">
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>Accounts scanned this pass</span>
+          <span className="font-mono">{passPct}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-muted" role="progressbar" aria-valuenow={passPct} aria-valuemin={0} aria-valuemax={100} aria-label="Accounts scanned this pass">
+          <div className="h-2 rounded-full bg-primary" style={{ width: `${passPct}%` }} />
+        </div>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div>
+          <h3 className="mb-2 font-mono text-xs tracking-wider text-muted-foreground uppercase">Customers by state</h3>
+          <ul className="space-y-1.5" aria-label="Affected customers by state">
+            {byState.map(s => (
+              <li key={s.state} className="grid grid-cols-[2.5rem_1fr] items-center gap-2 text-sm">
+                <span className="font-mono text-muted-foreground">{s.state}</span>
+                <span className="flex items-center gap-2">
+                  <span className="h-4 rounded-r bg-primary" style={{ width: `${Math.max(2, Number((s.records * 80n) / max))}%` }} aria-hidden="true" />
+                  <span className="font-mono text-xs tabular-nums">{s.records.toLocaleString()}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <h3 className="mb-2 font-mono text-xs tracking-wider text-muted-foreground uppercase">Suspicious transactions found</h3>
+          {flagged.length === 0 ? (
+            <p className="text-sm text-muted-foreground italic">None yet. Each click checks more accounts.</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-border/60 text-sm">
+              {flagged.slice(0, 8).map(a => (
+                <li key={a.id.toString()} className="flex flex-wrap items-baseline gap-x-2 py-1.5">
+                  <strong className="font-mono text-white">{money(a.amountCents)}</strong>
+                  <code className="font-mono text-xs text-muted-foreground">{a.accountRef}</code>
+                  <span className="min-w-0 flex-1 text-muted-foreground">{a.reason}</span>
+                  <span className={cn('font-mono text-xs uppercase', a.status === 'frozen' ? 'text-neon' : a.status === 'open' ? 'text-magenta' : 'text-muted-foreground')}>
+                    {a.status === 'open' ? 'waiting' : a.status}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </Panel>
   );
 }
 
