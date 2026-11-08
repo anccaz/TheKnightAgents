@@ -252,7 +252,7 @@ function DrillControls() {
         type="button"
         variant="outline"
         onClick={() =>
-          window.confirm('Start an autopilot drill? The attack and the whole response play out on their own (about 3 minutes).') &&
+          window.confirm('Start an autopilot drill? The attack and the whole response play out on their own (about a minute and a half).') &&
           run(startAutopilotDrill(), 'Autopilot drill started')
         }
       >

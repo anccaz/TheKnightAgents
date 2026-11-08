@@ -196,6 +196,8 @@ test('autopilot drives an incident through all six phases', () => {
   expect(phaseOf(h, id)).toBe('post_incident');
   const done = h.withReducerTx(as('admin'), ctx => [...ctx.db.task.iter()].filter(t => t.incidentId === id).every(t => t.done));
   expect(done).toBe(true);
+  const openAlerts = h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()].filter(a => a.incidentId === id && a.status === 'open').length);
+  expect(openAlerts).toBe(0);
   const clocksFiled = h.withReducerTx(as('admin'), ctx => [...ctx.db.legalClock.iter()].filter(c => c.incidentId === id).every(c => c.done));
   expect(clocksFiled).toBe(true);
 });

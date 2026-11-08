@@ -63,11 +63,15 @@ export default function AfterActionSummary({ incident }: { incident: Incident })
   const records = (st: string) => items.filter(s => s.status === st).reduce((n, s) => n + s.recordsCount, 0n);
   const systems = items.filter(s => s.assetType === 'system' && s.status !== 'clear').length;
 
-  // Fraud: >= $10,000 is frozen automatically at creation; smaller frozen alerts were frozen by a person
+  // Fraud: frozen by a person = a team member clicked Freeze (timeline "Fraud alert <id> on <acct>: frozen");
+  // everything else was frozen by the system (Contain rule or autopilot).
   const fa = alerts.filter(a => a.incidentId === id);
-  const autoFrozen = fa.filter(a => a.status === 'frozen' && a.amountCents >= 1_000_000n);
-  const humanFrozen = fa.filter(a => a.status === 'frozen' && a.amountCents < 1_000_000n);
-  const frozenCents = [...autoFrozen, ...humanFrozen].reduce((n, a) => n + a.amountCents, 0n);
+  const people = new Set(members.map(m => m.identity.toHexString()));
+  const byPerson = (e: (typeof events)[number]) => people.has(e.actor.toHexString());
+  const frozenAll = fa.filter(a => a.status === 'frozen');
+  const humanFrozen = frozenAll.filter(a => events.some(e => e.incidentId === id && byPerson(e) && e.text.startsWith(`Fraud alert ${a.id} on `) && e.text.endsWith(': frozen')));
+  const autoFrozen = frozenAll.filter(a => !humanFrozen.includes(a));
+  const frozenCents = frozenAll.reduce((n, a) => n + a.amountCents, 0n);
 
   // Legal: a notice counts as on time if it was marked sent before its deadline
   const sentAt = new Map(statuses.filter(s => s.incidentId === id && s.status === 'sent').map(s => [s.notice, s.updatedAt.toDate().getTime()]));
@@ -78,8 +82,6 @@ export default function AfterActionSummary({ incident }: { incident: Incident })
 
   // Who did the work
   // A person = a team member's identity; the drill, autopilot and timers act as the database itself.
-  const people = new Set(members.map(m => m.identity.toHexString()));
-  const byPerson = (e: (typeof evs)[number]) => people.has(e.actor.toHexString());
   const advisorCount = evs.filter(e => e.text.startsWith('Advisor suggestion confirmed')).length;
   const humanCount = evs.filter(e => byPerson(e) && e.kind !== 'auto' && !e.text.startsWith('Advisor suggestion confirmed')).length;
   const autoCount = evs.filter(e => !byPerson(e) || e.kind === 'auto').length;

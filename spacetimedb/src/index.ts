@@ -482,7 +482,10 @@ const AUTO_TASKS: Record<string, (ctx: Ctx, id: bigint) => boolean> = {
     [...ctx.db.timelineEvent.incidentId.filter(id)].some(e => e.kind === 'ioc' || (e.kind === 'note' && !e.text.startsWith('Incident declared'))),
   'List every affected system and customer in What was hit': (ctx, id) => [...ctx.db.scopeItem.incidentId.filter(id)].length > 0,
   'Confirm with Legal that the deadline clocks are right': (ctx, id) => [...ctx.db.legalClock.incidentId.filter(id)].length > 0,
-  'Review every fraud alert: freeze or dismiss': (ctx, id) => ![...ctx.db.fraudAlert.incidentId.filter(id)].some(a => a.status === 'open'),
+  'Review every fraud alert: freeze or dismiss': (ctx, id) => {
+    const alerts = [...ctx.db.fraudAlert.incidentId.filter(id)];
+    return alerts.length > 0 && !alerts.some(a => a.status === 'open');
+  },
   'Send customer notices once Legal approves': (ctx, id) => {
     const states = [...ctx.db.stateImpact.incidentId.filter(id)].filter(s => s.records > 0n);
     const sent = new Set([...ctx.db.notifyStatus.incidentId.filter(id)].filter(n => n.status === 'sent').map(n => n.notice));
@@ -494,7 +497,7 @@ const AUTO_TASKS: Record<string, (ctx: Ctx, id: bigint) => boolean> = {
   },
 };
 const ADVANCE_SEC = 30;
-const AUTOPILOT_ADVANCE_SEC = 6;
+const AUTOPILOT_ADVANCE_SEC = 3;
 const isAutopilot = (title: string) => title.startsWith('AUTOPILOT');
 const nextPhase = (phase: string) => PHASES[PHASES.indexOf(phase as (typeof PHASES)[number]) + 1];
 
@@ -1150,7 +1153,8 @@ const DRILL: { waitSec: number; run: (ctx: Ctx, id: bigint) => void }[] = [
 ];
 
 function scheduleStep(ctx: Ctx, incidentId: bigint, step: number) {
-  const at = ctx.timestamp.microsSinceUnixEpoch + BigInt(DRILL[step].waitSec) * 1_000_000n;
+  const fast = isAutopilot(ctx.db.incident.id.find(incidentId)?.title ?? '');
+  const at = ctx.timestamp.microsSinceUnixEpoch + BigInt(DRILL[step].waitSec) * (fast ? 500_000n : 1_000_000n);
   ctx.db.drillStep.insert({ scheduledId: 0n, scheduledAt: ScheduleAt.time(at), incidentId, step });
 }
 
@@ -1188,8 +1192,8 @@ export const runDrillStep = db.reducer({ onSchedule: drillStep }, { row: drillSt
 });
 
 // ---------- Autopilot drill: the attack AND the response play out on their own ----------
-const AUTOPILOT_TICK_SEC = 5;
-const AUTOPILOT_MAX_TICKS = 120;
+const AUTOPILOT_TICK_SEC = 2;
+const AUTOPILOT_MAX_TICKS = 300; // 10 minutes at 2 s
 
 function scheduleAutopilot(ctx: Ctx, incidentId: bigint, tick: number) {
   const at = ctx.timestamp.microsSinceUnixEpoch + BigInt(AUTOPILOT_TICK_SEC) * 1_000_000n;
@@ -1211,6 +1215,12 @@ export const runAutopilotStep = db.reducer({ onSchedule: autopilotStep }, { row:
   const inc = ctx.db.incident.id.find(row.incidentId);
   if (!inc || row.tick > AUTOPILOT_MAX_TICKS) return;
   const id = row.incidentId;
+  if (containing(ctx, id))
+    for (const a of [...ctx.db.fraudAlert.incidentId.filter(id)].filter(a => a.status === 'open')) {
+      ctx.db.fraudAlert.id.update({ ...a, status: 'frozen' });
+      audit(ctx, 'fraud_alert_status', `${a.id}: frozen (autopilot)`);
+      timeline(ctx, id, 'auto', `Autopilot: froze account ${a.accountRef}`);
+    }
   const open = [...ctx.db.task.incidentId.filter(id)]
     .filter(tk => tk.phase === inc.phase && !tk.done)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
