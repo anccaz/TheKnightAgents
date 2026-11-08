@@ -95,4 +95,6 @@ Tick boxes as you go (edit this file, commit, push). Deadlines: **initial Devpos
 **Contract:** tables and reducers are defined in `spacetimedb/src/index.ts`. Only Lane A edits table definitions; ask A for new fields. Merge to `main` every 2–3 hours.
 
 ## Working with Claude Code
+Ready-made prompts per lane (with shared project context) are in [docs/agent-prompts.md](docs/agent-prompts.md): paste the Shared context plus your lane's block into a new chat.
+
 Project skills live in `.claude/skills/`: `spacetime-module`, `breach-room-ui`, `nessie-api`. `CLAUDE.md` tells each session to load the right one for its folder.

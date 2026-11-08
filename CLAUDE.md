@@ -2,6 +2,8 @@
 
 Out-of-band cyber incident command center for a bank. Tracks: Winstead (incident dashboard), Spacetime (real-time backend), Capital One (Nessie). Full plan: docs/plan.md.
 
+Per-lane task prompts for agents: docs/agent-prompts.md (paste Shared context + one lane).
+
 ## Layout
 - `spacetimedb/` — SpacetimeDB module, the data contract. Skill: `spacetime-module`.
 - `client/` — Vite + React UI. Skill: `breach-room-ui`.
