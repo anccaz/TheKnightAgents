@@ -1,4 +1,4 @@
-# Breach Room demo scripts
+# Knight Agent demo scripts
 
 Three 3-minute scripts, one per sponsor. Same app, same drill; the story changes with the judge.
 
@@ -37,7 +37,7 @@ For the real-incident story, show the 30-second banner after the Detect tasks ar
 
 | Time | Do | Say |
 |---|---|---|
-| 0:00 | Both browsers visible. | "It's 2 AM. Ransomware just hit First Avon Bank, and the attacker owns email and Slack. Breach Room runs outside the bank's network, so the response team still has a place to work." |
+| 0:00 | Both browsers visible. | "It's 2 AM. Ransomware just hit First Avon Bank, and the attacker owns email and Slack. Knight Agent runs outside the bank's network, so the response team still has a place to work." |
 | 0:20 | Browser C: show **Join the response team**, click **Copy my ID**. | "There are no passwords and no invite codes to steal. Each device has a cryptographic identity. You read this ID to your admin by phone or in person." |
 | 0:35 | Browser A: **Team** tab, paste into **Add member**, role **Legal**, click **Add member**. Browser C opens by itself. | "The admin adds that ID with a role. Five roles: admin, incident lead, responder, legal, exec viewer. The checks run on the server, not just hidden buttons." |
 | 0:50 | Point at Browser B. | "Our exec viewer can't see the lawyers' privileged channel and can't see the Team page or the audit log. The data never reaches their browser." |
@@ -56,7 +56,7 @@ For the real-incident story, show the 30-second banner after the Detect tasks ar
 
 | Time | Do | Say |
 |---|---|---|
-| 0:00 | Both browsers visible. | "Breach Room has no app server. The browser talks straight to SpacetimeDB. That's the whole backend." |
+| 0:00 | Both browsers visible. | "Knight Agent has no app server. The browser talks straight to SpacetimeDB. That's the whole backend." |
 | 0:20 | Open `spacetimedb/src/index.ts` briefly, or just point at the app. | "Every rule is a reducer: declare an incident, change phase, freeze an account, mark a notice sent. Each one checks the caller's role, then runs in one transaction." |
 | 0:40 | Browser A: click **Run 2 AM drill**, confirm. | "The drill is a scheduled reducer. Each step is a row in a scheduled table, and SpacetimeDB runs the next one on time. Nobody can call a step by hand; the reducer rejects it." |
 | 1:00 | Point back and forth as events land in both browsers. | "Every screen is a live subscription. Watch both browsers: the same event shows up in both at the same moment, no polling, no refresh." |

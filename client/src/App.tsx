@@ -3,7 +3,7 @@ import { useSpacetimeDB, useTable } from 'spacetimedb/react';
 import { Radio, ShieldAlert, Users } from 'lucide-react';
 import { tables } from '@/module_bindings';
 import GradientASCII from '@/components/GradientASCII';
-import { PHASE_LABEL, ROLE_LABEL, SeverityChip, useCurrentIncident, useMe } from '@/components/shared';
+import { PHASE_LABEL, ROLE_LABEL, SeverityChip, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
 import { cn } from '@/lib/utils';
 import IncidentPage from '@/pages/incident/IncidentPage';
 import FeedPage from '@/pages/feed/FeedPage';
@@ -67,10 +67,13 @@ export default function App() {
       <header className="sticky top-0 z-20 border-b border-border bg-card">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <span className="font-heading text-xl font-bold tracking-[0.25em] text-white">
-            BREACH<span className="text-magenta">//</span>ROOM
+            KNIGHT<span className="text-magenta">//</span>AGENT
           </span>
           {incident ? (
             <span className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="rounded border border-border px-2 py-0.5 font-mono text-xs text-muted-foreground" title="Incident ID">
+                {incidentCode(incident)}
+              </span>
               <strong className="truncate">{incident.title}</strong>
               <span className="rounded-full border border-neon/50 px-2.5 py-0.5 font-mono text-xs text-neon">
                 PHASE: {(PHASE_LABEL[incident.phase] ?? incident.phase).toUpperCase()}

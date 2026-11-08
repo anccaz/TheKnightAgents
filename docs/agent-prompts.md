@@ -1,4 +1,4 @@
-# Agent prompts: Breach Room
+# Agent prompts: Knight Agent
 
 Paste **Shared context** plus **one lane's prompt** into a fresh Claude / agent chat opened in this repo. Each lane prompt is self-contained and lists only what's **still left**. Everything finished is in the shared context.
 
@@ -11,7 +11,7 @@ Branches: `main` (shared, deployable), lane branches (`lane-b`, `annie` for Lane
 
 ```text
 === PROJECT ===
-"Breach Room" (repo github.com/anccaz/TheKnightAgents, public) - HackUTD 2026.
+"Knight Agent" (repo github.com/anccaz/TheKnightAgents, public) - HackUTD 2026.
 An out-of-band, real-time cyber-incident command center for a bank's response team. It runs outside the bank's
 network so the team can coordinate when attackers own email/Slack. Demo bank: "First Avon Bank".
 
@@ -206,7 +206,7 @@ Files: client/src/lib/notifyRules.ts, LEGAL_RULES / GUIDED text in spacetimedb/s
 new Gemini integration, Devpost, slides, domain/deploy.
 
 Still to do, in order:
-1. Initial Devpost (if not done): title "Breach Room", one-liner, tracks Winstead, Spacetime, Capital One,
+1. Initial Devpost (if not done): title "Knight Agent", one-liner, tracks Winstead, Spacetime, Capital One,
    MLH Gemini, MLH GoDaddy; repo github.com/anccaz/TheKnightAgents.
 2. Verify legal rules with sources (comments in code), keep "verify before relying" in UI:
    - notifyRules.ts: TX (customers 60 days; AG 250+ within 30 days), CA, FL, NY customer + AG rules; add
