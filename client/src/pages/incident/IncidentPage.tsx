@@ -1,9 +1,10 @@
 // Lane B owner: the whole incident on one screen: declare, phase, record, tasks, what was hit, fraud decisions.
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useReducer, useTable } from 'spacetimedb/react';
-import { Check, CircleHelp, Download, Eye, Lock, Play, ShieldCheck, Snowflake, Square, ThumbsUp, Zap, type LucideIcon } from 'lucide-react';
+import { BarChart3, Check, CircleHelp, Download, Eye, Lock, Play, ShieldCheck, Snowflake, Square, ThumbsUp, Zap, type LucideIcon } from 'lucide-react';
 import { reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
+import AfterActionSummary from '@/components/AfterActionSummary';
 import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SCOPE_STATUSES, SEVERITIES, SeverityChip, WRITERS, can, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -31,7 +32,9 @@ const money = (cents: bigint) => `$${(cents / 100n).toLocaleString()}.${(cents %
 
 export default function IncidentPage() {
   const incident = useCurrentIncident();
+  const [showSummary, setShowSummary] = useState(false);
   if (!incident) return <DeclareForm />;
+  const summary = incident.phase === 'post_incident' || showSummary;
   return (
     <div className="flex flex-col gap-6">
       <section className="glass flex flex-col gap-4 p-5">
@@ -40,10 +43,18 @@ export default function IncidentPage() {
             <p className="font-mono text-xs tracking-[0.3em] text-magenta uppercase">Active incident</p>
             <h1 className="text-2xl font-bold break-words text-white sm:text-3xl">{incident.title}</h1>
           </div>
-          <DrillControls />
+          <span className="flex flex-wrap gap-2">
+            <DrillControls />
+            {incident.phase !== 'post_incident' && (
+              <Button type="button" variant="outline" aria-pressed={showSummary} onClick={() => setShowSummary(v => !v)}>
+                <BarChart3 /> {showSummary ? 'Hide summary' : 'Summary'}
+              </Button>
+            )}
+          </span>
         </div>
         <PhaseStepper incidentId={incident.id} phase={incident.phase} />
       </section>
+      {summary && <AfterActionSummary incident={incident} />}
       <div className="grid gap-6 lg:grid-cols-2">
         <IncidentRecord incident={incident} />
         <Tasks incidentId={incident.id} phase={incident.phase} />
