@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateBank, isSuspicious, makeRng, normalizeActivity, countByState, accountLabel, pmap, STATE_INFO } from './lib.mjs';
+import { generateBank, isSuspicious, makeRng, normalizeActivity, countByState, accountLabel, pmap, STATE_INFO, LIVE_TARGET_MIN_BALANCE } from './lib.mjs';
 
 const asItem = s =>
   s.kind === 'bill'
@@ -61,6 +61,21 @@ test('isSuspicious needs amount threshold AND 2-4 AM (and a new payee for bills)
   const b = { kind: 'bill', amount: 7000, description: 'wire 02:10', payee: 'Mule-X LLC' };
   assert.match(isSuspicious(b), /new payee Mule-X LLC/);
   assert.equal(isSuspicious({ ...b, payee: 'Avon Electric' }), null, 'known payee');
+});
+
+test('planted withdrawals and live targets are funded', () => {
+  const bank = generateBank();
+  const acct = ([ci, ai]) => bank.customers[ci].accounts[ai];
+  for (const s of bank.suspicious) {
+    const amount = s.kind === 'withdrawal' ? s.body.amount : s.body.payment_amount;
+    assert.ok(acct(s.from).balance > amount, `balance covers ${s.kind} of ${amount}`);
+  }
+  for (const r of bank.liveTargets) assert.ok(acct(r).balance >= LIVE_TARGET_MIN_BALANCE);
+});
+
+test('default bank fills all five states', () => {
+  const states = new Set(generateBank().customers.map(c => c.address.state));
+  assert.deepEqual([...states].sort(), ['CA', 'FL', 'NY', 'OK', 'TX']);
 });
 
 test('countByState, accountLabel, pmap', async () => {

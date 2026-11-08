@@ -2,7 +2,7 @@
 // Imports the Nessie "First Avon Bank" data into a Breach Room incident (shells out to `spacetime call`).
 //
 // Usage: node scripts/import-nessie.mjs --incident <id> [--server <name|url>] [--db breach-room]
-//                                       [--watch] [--interval 10] [--watch-all] [--all] [--dry-run]
+//                                       [--watch] [--interval 10] [--watch-all] [--all] [--fresh] [--dry-run]
 //
 //  1. customers grouped by address.state      -> set_state_impact   (fills the notice priority chart)
 //  2. one aggregate customer scope item       -> upsert_scope_item  (exfiltrated; starts the legal clocks)
@@ -35,7 +35,7 @@ const SERVER = opt('--server', process.env.SPACETIME_SERVER);
 const DB = opt('--db', process.env.SPACETIME_DB ?? 'breach-room');
 const incidentRaw = opt('--incident') ?? (/^\d+$/.test(args[0] ?? '') ? args[0] : undefined);
 if (!incidentRaw || !/^\d+$/.test(incidentRaw) || !(intervalSec > 0)) {
-  console.error('Usage: node scripts/import-nessie.mjs --incident <id> [--server <name|url>] [--watch] [--interval 10] [--watch-all] [--all] [--dry-run]');
+  console.error('Usage: node scripts/import-nessie.mjs --incident <id> [--server <name|url>] [--watch] [--interval 10] [--watch-all] [--all] [--fresh] [--dry-run]');
   process.exit(1);
 }
 const incidentId = Number(incidentRaw);
@@ -89,9 +89,13 @@ function stdb(reducer, ...callArgs) {
   }
 }
 
-// What we already pushed per incident, so reruns and --watch never duplicate alerts or timeline entries.
+// What we already pushed per server + database + incident, so reruns and --watch never duplicate alerts or timeline
+// entries. Keyed by server too: incident 1 on a local server and incident 1 on Maincloud are different incidents.
+// --fresh forgets this target's progress (e.g. after wiping a local database, when incident ids restart at 1).
 const state = existsSync(STATE_PATH) ? JSON.parse(readFileSync(STATE_PATH, 'utf8')) : {};
-const mine = (state[incidentId] ??= { scopes: [], alerts: [] });
+const stateKey = `${SERVER ?? 'default'}/${DB}/${incidentId}`;
+if (flag('--fresh')) delete state[stateKey];
+const mine = (state[stateKey] ??= { scopes: [], alerts: [] });
 const save = () => !dryRun && writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
 
 const seed = existsSync(SEED_OUT) ? JSON.parse(readFileSync(SEED_OUT, 'utf8')) : null;

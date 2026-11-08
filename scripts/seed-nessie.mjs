@@ -24,7 +24,8 @@ const reset = args.includes('--reset');
 const dryRun = args.includes('--dry-run');
 const plant = args.includes('--plant');
 const countIdx = args.indexOf('--count');
-const count = countIdx >= 0 ? Number(args[countIdx + 1]) : 260; // 260 customers: enough to pass the Texas AG 250+ rule
+// 260 customers (~160 in TX): 250+ records stolen in total, which starts the Texas AG legal clock in the module.
+const count = countIdx >= 0 ? Number(args[countIdx + 1]) : 260;
 if (!Number.isInteger(count) || count < 1) {
   console.error('--count must be a positive integer');
   process.exit(1);

@@ -2,6 +2,7 @@
 // Amounts are dollars (Nessie's unit); convert with toCents() before writing to SpacetimeDB.
 
 export const SUSPICIOUS_MIN_DOLLARS = 5000;
+export const LIVE_TARGET_MIN_BALANCE = 75_000; // covers 5 `--plant` runs
 
 // Payees the bank's customers normally pay; anything else on a 2-4 AM bill is a "new payee".
 export const KNOWN_PAYEES = new Set(['Avon Electric', 'Knight Water', 'Ledger Internet', 'Vault Insurance', 'Patch Rent']);
@@ -105,6 +106,16 @@ export function generateBank({ count = 260, seed = 42, suspiciousCount = 6, live
 
   const liveTargets = [];
   for (let i = 0; i < Math.min(liveTargetCount, pool.length); i++) liveTargets.push(pool.splice(int(rng, 0, pool.length - 1), 1)[0]);
+
+  // Funded accounts: a planted withdrawal never exceeds its balance (Nessie may reject that, and it looks fake),
+  // and live targets can absorb several `--plant` withdrawals (~$12-13k each).
+  const accountAt = ([ci, ai]) => customers[ci].accounts[ai];
+  for (const s of suspicious) {
+    const a = accountAt(s.from);
+    const amount = s.kind === 'withdrawal' ? s.body.amount : s.body.payment_amount;
+    a.balance = Math.max(a.balance, amount + int(rng, 2000, 8000));
+  }
+  for (const r of liveTargets) accountAt(r).balance = Math.max(accountAt(r).balance, LIVE_TARGET_MIN_BALANCE);
 
   return { customers, suspicious, liveTargets };
 }
