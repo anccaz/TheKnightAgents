@@ -33,6 +33,15 @@ Built at HackUTD 2026 for **Winstead PC** (Cyber Incident Response Dashboard), *
    ```
    (add `--server http://127.0.0.1:3010` for local). After that, admins add teammates by ID on **Team & access**.
 6. Module tests: `cd spacetimedb && npm test` (role checks and views).
+7. **AI notice drafts (optional, Gemini):** the key lives in the database's private environment, never in git or the browser.
+   ```bash
+   cd spacetimedb
+   export GEMINI_API_KEY=<your key>   # from https://aistudio.google.com/apikey; optional: GEMINI_MODEL=<model> (default: newest Flash)
+   npm run publish:cloud               # or publish:local; the CLI picks up declared env vars from the shell
+   # later, change only the key without republishing code:
+   spacetime publish --server maincloud breach-room --env-only
+   ```
+   Without a key, the "Draft with AI" button shows an error toast and everything else works.
 
 ## Demo: the 2 AM drill
 On the Incident page an incident lead clicks **▶ Run 2 AM drill**. A scripted attack plays out live over ~90 s (encryption alert, ransom note, data theft, fraudulent transfers). The app reacts on its own, marked **⚡ Auto** on the timeline:

@@ -81,3 +81,12 @@ test('notice status upserts, audits sends, and is blocked for viewers', () => {
   h.withReducerTx(as('owner'), ctx => mod.addMember(ctx, { target: viewer, name: 'v', email: 'v', role: 'exec_viewer' }));
   expect(() => h.withReducerTx(as('viewer'), set('sent'))).toThrow(/Requires role/);
 });
+
+test('SEC 8-K clock lands 4 business days out, never on a weekend', () => {
+  const h = setup();
+  h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, scope('exfiltrated', 100n)));
+  const sec = h.withReducerTx(as('admin'), ctx => [...ctx.db.legalClock.iter()].find(c => c.regime === 'sec_8k')!);
+  const hours = Number((sec.deadlineAt.microsSinceUnixEpoch - sec.startedAt.microsSinceUnixEpoch) / 3_600_000_000n);
+  expect([96, 120, 144]).toContain(hours);
+  expect([0, 6]).not.toContain(sec.deadlineAt.toDate().getUTCDay());
+});
