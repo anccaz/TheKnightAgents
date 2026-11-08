@@ -6,3 +6,8 @@ dist/
 .DS_Store
 .env
 client/.env
+
+# local run data from the Nessie scripts
+scripts/seed-output.json
+scripts/import-state.json
+*.tsbuildinfo

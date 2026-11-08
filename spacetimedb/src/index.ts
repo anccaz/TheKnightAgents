@@ -3,6 +3,7 @@
 import { schema, table, t, SenderError, ScheduleAt } from 'spacetimedb/server';
 import { Timestamp, TimeDuration } from 'spacetimedb';
 import { ADVISOR_SCHEMA, advisorPrompt, checkReply, left, ruleBasedReply, type AdvisorFacts } from './advisor';
+import { auditHash } from './auditChain';
 import { NESSIE_BASE, accountLabel, batch, countByState, isSuspicious, normalizeActivity, type Activity, type NessieAccount, type NessieCustomer } from './nessie';
 
 // ---------- Enums (kept as strings; validated in reducers) ----------
@@ -160,6 +161,10 @@ const auditLog = table(
     actor: t.identity(),
     action: t.string(),
     detail: t.string(),
+    // Hash chain (see auditChain.ts). Defaults keep the migration additive: rows written before the
+    // chain existed have '' and the verifier reports them as "before the seal", not as tampering.
+    prevHash: t.string().default(''),
+    hash: t.string().default(''),
   }
 );
 
@@ -308,8 +313,29 @@ function requireIncident(ctx: Ctx, incidentId: bigint) {
   return inc;
 }
 
+// Append-only and hash-chained: each entry seals the previous entry's hash plus its own content.
+// The id is part of the hash, so we insert first (to get the auto-inc id) and seal in the same transaction.
 function audit(ctx: Ctx, action: string, detail: string) {
-  ctx.db.auditLog.insert({ id: 0n, at: ctx.timestamp, actor: ctx.sender, action, detail });
+  const row = ctx.db.auditLog.insert({ id: 0n, at: ctx.timestamp, actor: ctx.sender, action, detail, prevHash: '', hash: '' });
+  const prevHash = previousAuditHash(ctx, row.id);
+  const hash = auditHash(prevHash, {
+    id: row.id,
+    atMicros: row.at.microsSinceUnixEpoch,
+    actorHex: row.actor.toHexString(),
+    action,
+    detail,
+  });
+  ctx.db.auditLog.id.update({ ...row, prevHash, hash });
+}
+
+// Hash of the entry just before `id` ('' for the first one). Ids are usually consecutive, but auto-inc
+// can skip numbers after a restart, so fall back to a scan.
+function previousAuditHash(ctx: Ctx, id: bigint): string {
+  const direct = id > 0n ? ctx.db.auditLog.id.find(id - 1n) : null;
+  if (direct) return direct.hash;
+  let best: { id: bigint; hash: string } | null = null;
+  for (const r of ctx.db.auditLog.iter()) if (r.id < id && (!best || r.id > best.id)) best = r;
+  return best?.hash ?? '';
 }
 
 function timeline(ctx: Ctx, incidentId: bigint, kind: string, text: string) {
