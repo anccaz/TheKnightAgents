@@ -2,9 +2,12 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { Identity } from 'spacetimedb';
 import { useProcedure, useReducer, useTable } from 'spacetimedb/react';
-import { BarChart3, Check, FilePlus, CircleHelp, Download, Eye, LayoutGrid, Lock, MessagesSquare, Play, Radar, ShieldCheck, Snowflake, Square, ThumbsUp, UserCheck, Zap, type LucideIcon } from 'lucide-react';
+import { BarChart3, Check, FilePlus, CircleHelp, Download, Eye, Gauge, LayoutGrid, Lock, MessagesSquare, Play, Radar, ShieldCheck, Snowflake, Square, ThumbsUp, UserCheck, Zap, type LucideIcon } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ConversationView from './ConversationView';
+import OverviewView from './OverviewView';
+
+type Mode = 'overview' | 'conversation' | 'classic';
 import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import AfterActionSummary from '@/components/AfterActionSummary';
@@ -53,14 +56,15 @@ export default function IncidentPage() {
   const [showSummary, setShowSummary] = useState(false);
   // "New incident": show the declare form over this one. Once a newer incident exists, this id no longer matches and it closes.
   const [freshFrom, setFreshFrom] = useState<bigint | null>(null);
-  const [mode, setMode] = useState<'conversation' | 'classic'>(() => {
+  const [mode, setMode] = useState<Mode>(() => {
     try {
-      return localStorage.getItem('breach-room:view') === 'classic' ? 'classic' : 'conversation';
+      const saved = localStorage.getItem('breach-room:view');
+      return saved === 'classic' || saved === 'conversation' ? saved : 'overview';
     } catch {
-      return 'conversation';
+      return 'overview';
     }
   });
-  const pickMode = (m: 'conversation' | 'classic') => {
+  const pickMode = (m: Mode) => {
     setMode(m);
     try {
       localStorage.setItem('breach-room:view', m);
@@ -77,8 +81,11 @@ export default function IncidentPage() {
         <h1 className="text-2xl font-bold break-words text-white sm:text-3xl">{incident.title}</h1>
       </div>
       <span className="flex flex-wrap items-center gap-2">
-        <Tabs value={mode} onValueChange={v => pickMode(v as 'conversation' | 'classic')}>
+        <Tabs value={mode} onValueChange={v => pickMode(v as Mode)}>
           <TabsList>
+            <TabsTrigger value="overview">
+              <Gauge /> Overview
+            </TabsTrigger>
             <TabsTrigger value="conversation">
               <MessagesSquare /> Conversation
             </TabsTrigger>
@@ -101,11 +108,19 @@ export default function IncidentPage() {
       </span>
     </div>
   );
+  if (mode === 'overview')
+    return (
+      <div className="flex flex-col gap-5">
+        <AgentTrigger incidentId={incident.id} phase={incident.phase} />
+        <section className="rounded-2xl border border-white/[0.06] bg-card/90 px-5 py-4 backdrop-blur">{header}</section>
+        <OverviewView incident={incident} />
+      </div>
+    );
   if (mode === 'conversation')
     return (
-      <div className="flex flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
         <AgentTrigger incidentId={incident.id} phase={incident.phase} />
-        <section className="glass p-5">{header}</section>
+        {header}
         <ConversationView incident={incident} />
       </div>
     );
@@ -595,7 +610,7 @@ export function IncidentRecord({ incident }: { incident: Incident }) {
   );
 }
 
-export function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+export function Tasks({ incidentId, phase, onlyPhase }: { incidentId: bigint; phase: string; onlyPhase?: boolean }) {
   const me = useMe();
   const [allTasks] = useTable(tables.tasks);
   const addTask = useReducer(reducers.addTask);
@@ -609,7 +624,7 @@ export function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string
   const nameOf = (who: Identity) => users.find(u => u.identity.isEqual(who))?.name ?? 'Autopilot';
   // Current phase first, then open before done.
   const tasks = allTasks
-    .filter(t => t.incidentId === incidentId)
+    .filter(t => t.incidentId === incidentId && (!onlyPhase || t.phase === phase))
     .sort((a, b) => Number(b.phase === phase) - Number(a.phase === phase) || Number(a.done) - Number(b.done) || (a.id < b.id ? -1 : 1));
   const open = tasks.filter(t => !t.done && t.phase === phase).length;
   const submit = (e: FormEvent) => {
