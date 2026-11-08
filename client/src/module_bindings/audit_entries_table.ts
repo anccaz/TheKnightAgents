@@ -16,4 +16,6 @@ export default __t.row({
   actor: __t.identity(),
   action: __t.string(),
   detail: __t.string(),
+  prevHash: __t.string().name("prev_hash"),
+  hash: __t.string(),
 });

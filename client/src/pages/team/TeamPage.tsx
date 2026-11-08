@@ -8,6 +8,7 @@ import { useRun } from '@/components/Toast';
 import { ROLES, ROLE_LABEL, useMe } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { verifyAuditChain, type AuditRow, type ChainResult } from '@/lib/auditChain';
 
 /* -------------------------------------------------------------------------- */
 /* Cryptographic Identity Chip Component                                      */
@@ -327,34 +328,72 @@ export default function TeamPage() {
   );
 }
 
-/** Security events: the append-only audit log (admins and executives). Nothing in the app can edit or delete it. */
-function AuditLog({ entries, names }: { entries: readonly { id: bigint; at: { toDate(): Date }; actor: Identity; action: string; detail: string }[]; names: Map<string, string> }) {
+/** Security events: the append-only, hash-chained audit log (admins and executives). Nothing in the app can edit or delete it. */
+function AuditLog({ entries, names }: { entries: readonly AuditRow[]; names: Map<string, string> }) {
   const [action, setAction] = useState('');
+  const [check, setCheck] = useState<{ result: ChainResult; count: number } | 'running' | null>(null);
   const actions = useMemo(() => [...new Set(entries.map(e => e.action))].sort(), [entries]);
   const shown = [...entries].filter(e => !action || e.action === action).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 100);
+  const result = check && check !== 'running' ? check.result : null;
+  const stale = check && check !== 'running' && check.count !== entries.length;
+  const badId = result && !result.ok ? result.id : null;
+
+  const verify = async () => {
+    setCheck('running');
+    const count = entries.length;
+    setCheck({ result: await verifyAuditChain(entries), count });
+  };
+
   return (
     <div className="border border-border bg-card p-4 space-y-3 font-mono text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
         <h3 className="font-heading uppercase tracking-wider text-white text-xs font-bold">Security events ({entries.length})</h3>
-        <label className="flex items-center gap-2 text-zinc-400">
-          Action
-          <select value={action} onChange={e => setAction(e.target.value)} className="bg-black/60 border border-border px-2 py-1 text-xs text-white font-mono">
-            <option value="">All</option>
-            {actions.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" size="sm" variant="outline" onClick={verify} disabled={check === 'running' || entries.length === 0}>
+            <ShieldCheck className="size-3.5" />
+            {check === 'running' ? 'Checking…' : 'Verify log integrity'}
+          </Button>
+          <label className="flex items-center gap-2 text-zinc-400">
+            Action
+            <select value={action} onChange={e => setAction(e.target.value)} className="bg-black/60 border border-border px-2 py-1 text-xs text-white font-mono">
+              <option value="">All</option>
+              {actions.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </label>
+        </div>
       </div>
-      <p className="text-zinc-500">Append-only: every security-relevant action, who did it and when. No one in the app can edit or delete these.</p>
+      {result && (
+        <div role="status" className={`border px-3 py-2 ${result.ok ? 'border-ok/50 text-ok' : 'border-sev-critical/60 text-sev-critical'}`}>
+          {result.ok ? (
+            <>
+              <p className="font-bold">✓ Intact: all {result.checked} sealed entries check out and link in order.</p>
+              <p className="text-zinc-400">
+                Seal {result.head ? result.head.slice(0, 16) : '(none yet)'}
+                {result.unsealed > 0 && ` · ${result.unsealed} older entr${result.unsealed === 1 ? 'y' : 'ies'} from before sealing started`}
+                {stale && ' · new events since this check, run it again'}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-bold">✗ {result.reason}.</p>
+              <p className="text-zinc-400">Checked {result.checked} entries before the break. Treat everything from this entry on as untrusted.</p>
+            </>
+          )}
+        </div>
+      )}
+      <p className="text-zinc-500">Append-only and sealed: each event includes a fingerprint (SHA-256) of the one before it, so changing or removing any event breaks every seal after it. The check runs in your browser.</p>
       {shown.length === 0 ? (
         <p className="text-zinc-500 italic">No events yet.</p>
       ) : (
         <ul className="divide-y divide-border">
           {shown.map(e => (
-            <li key={e.id.toString()} className="flex flex-wrap gap-x-3 py-1.5">
+            <li key={e.id.toString()} className={`flex flex-wrap gap-x-3 py-1.5 ${badId === e.id ? 'bg-sev-critical/15 outline outline-1 outline-sev-critical' : ''}`}>
+              <span className="text-zinc-600">#{e.id.toString()}</span>
               <time className="text-zinc-500">{e.at.toDate().toLocaleString()}</time>
               <span className="text-white">{names.get(e.actor.toHexString()) ?? 'System (drill, autopilot, timers)'}</span>
               <span className="text-neon">{e.action}</span>
               <span className="min-w-0 flex-1 break-words text-zinc-300">{e.detail}</span>
+              {badId === e.id && <span className="text-sev-critical font-bold">ALTERED</span>}
             </li>
           ))}
         </ul>

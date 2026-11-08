@@ -19,6 +19,8 @@ export const AuditLog = __t.object("AuditLog", {
   actor: __t.identity(),
   action: __t.string(),
   detail: __t.string(),
+  prevHash: __t.string(),
+  hash: __t.string(),
 });
 export type AuditLog = __Infer<typeof AuditLog>;
 
