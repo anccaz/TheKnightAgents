@@ -32,13 +32,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={run}>
       {children}
-      <div className="toasts" role="status" aria-live="assertive">
+      <div className="fixed right-4 bottom-4 z-50 flex max-w-sm flex-col gap-2" role="status" aria-live="assertive">
         {toasts.map(t => (
-          <div key={t.id} className={`toast ${t.ok ? 'toast-ok' : 'toast-err'}`}>
-            <strong>{t.ok ? 'Done: ' : 'Failed: '}</strong>
+          <div key={t.id} className={`glass flex items-start gap-2 px-3 py-2 text-sm ${t.ok ? 'border-ok/60' : 'border-sev-critical/70'}`}>
+            <strong className={t.ok ? 'text-ok' : 'text-sev-critical'}>{t.ok ? 'Done' : 'Failed'}</strong>
             {t.text}
             <button
-              className="toast-close"
+              className="ml-auto text-muted-foreground hover:text-foreground"
               aria-label="Dismiss"
               onClick={() => setToasts(ts => ts.filter(x => x.id !== t.id))}
             >

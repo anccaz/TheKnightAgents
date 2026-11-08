@@ -22,5 +22,8 @@ Winstead judges **ease of use under stress** almost as heavily as security. The 
 - Show reducer errors (SenderError text) in a visible toast; never fail silently.
 
 ## Structure
-- One folder per lane under `src/pages/` (access, incident, comms, scope, fraud, legal). Shared bits in `src/components/`.
-- Plain CSS in `src/styles.css` with CSS variables. No UI framework unless the team agrees.
+- 3 pages only: `src/pages/incident/` (record, phases, tasks, what was hit, fraud), `src/pages/feed/` (notification map, deadlines, merged chat + timeline + security feed), `src/pages/team/` (join, add member, roles, security events). Shell in `src/App.tsx`.
+- Styling: Tailwind v4 + shadcn ("base-nova", built on @base-ui/react, NOT Radix: check `src/components/ui/*` props before use). Cyberpunk tokens in `src/index.css`: use `glass` panels, `neon-text`/`magenta-text`, colors `text-neon`, `text-magenta`, `text-sev-*`, `text-ok`, `font-mono` for labels.
+- Background: React Bits `GradientASCII` in `App.tsx`. Don't add backgrounds per page.
+- Import with `@/` (e.g. `@/components/ui/button`). Icons: `lucide-react`.
+- Notification rules live in `src/lib/notifyRules.ts` (Lane D verifies them).

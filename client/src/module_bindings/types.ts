@@ -33,6 +33,14 @@ export type Channel = __Infer<typeof Channel>;
 export const Channels = __t.object("Channels", {});
 export type Channels = __Infer<typeof Channels>;
 
+export const DrillStep = __t.object("DrillStep", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  incidentId: __t.u64(),
+  step: __t.u32(),
+});
+export type DrillStep = __Infer<typeof DrillStep>;
+
 export const FraudAlert = __t.object("FraudAlert", {
   id: __t.u64(),
   incidentId: __t.u64(),
@@ -92,7 +100,7 @@ export const Messages = __t.object("Messages", {});
 export type Messages = __Infer<typeof Messages>;
 
 export const Owner = __t.object("Owner", {
-  id: __t.u32(),
+  id: __t.u8(),
   identity: __t.identity(),
 });
 export type Owner = __Infer<typeof Owner>;
@@ -112,6 +120,18 @@ export type ScopeItem = __Infer<typeof ScopeItem>;
 
 export const ScopeItems = __t.object("ScopeItems", {});
 export type ScopeItems = __Infer<typeof ScopeItems>;
+
+export const StateImpact = __t.object("StateImpact", {
+  id: __t.u64(),
+  incidentId: __t.u64(),
+  state: __t.string(),
+  records: __t.u64(),
+  since: __t.timestamp(),
+});
+export type StateImpact = __Infer<typeof StateImpact>;
+
+export const StateImpacts = __t.object("StateImpacts", {});
+export type StateImpacts = __Infer<typeof StateImpacts>;
 
 export const Task = __t.object("Task", {
   id: __t.u64(),

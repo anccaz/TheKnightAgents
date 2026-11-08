@@ -39,6 +39,12 @@ export function useMe() {
   return identity ? users.find(u => u.identity.isEqual(identity)) : undefined;
 }
 
+// Mirrors the server's requireRole lists so we hide buttons a role can't use (server still enforces).
+export const LEADS = ['admin', 'incident_lead'];
+export const WRITERS = ['admin', 'incident_lead', 'responder'];
+export const PRIVILEGED = ['admin', 'incident_lead', 'legal'];
+export const can = (me: { role: string } | undefined, roles: string[]) => !!me && roles.includes(me.role);
+
 // shortcut: "current incident" = newest incident; add an incident picker if two run at once.
 export function useCurrentIncident() {
   const [incidents] = useTable(tables.incidents);
@@ -48,16 +54,24 @@ export function useCurrentIncident() {
   );
 }
 
-/** Text + color, so status is readable without color. */
-export function Chip({ kind, value, label }: { kind: string; value: string; label?: string }) {
-  return <span className={`chip ${kind}-${value}`}>{label ?? value}</span>;
-}
+const SEV_CLASS: Record<string, string> = {
+  critical: 'border-magenta bg-magenta text-white',
+  high: 'border-magenta text-magenta',
+  medium: 'border-foreground/60 text-foreground',
+  low: 'border-border text-muted-foreground',
+};
 
+/** Severity as text + icon + color, so it reads without color too. */
 export function SeverityChip({ severity }: { severity: string }) {
-  const icon = severity === 'critical' ? '!!' : severity === 'high' ? '!' : '';
-  return <Chip kind="sev" value={severity} label={`${icon} ${severity.toUpperCase()}`.trim()} />;
+  const icon = severity === 'critical' ? '!! ' : severity === 'high' ? '! ' : '';
+  return (
+    <span className={`rounded-full border px-2.5 py-0.5 font-mono text-xs font-bold tracking-wider ${SEV_CLASS[severity] ?? ''}`}>
+      {icon}
+      {severity.toUpperCase()}
+    </span>
+  );
 }
 
 export function NoIncident() {
-  return <p className="empty">No incident yet: go to Incident and press "Declare incident".</p>;
+  return <p className="text-muted-foreground italic">No incident yet: open Incident and press "Declare incident" or "Run 2 AM drill".</p>;
 }

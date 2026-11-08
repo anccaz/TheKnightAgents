@@ -1,6 +1,6 @@
 // Breach Room: SpacetimeDB module. This file IS the data contract.
 // Only Lane A edits table definitions; others ask A for new fields.
-import { schema, table, t, SenderError } from 'spacetimedb/server';
+import { schema, table, t, SenderError, ScheduleAt } from 'spacetimedb/server';
 import { Timestamp } from 'spacetimedb';
 
 // ---------- Enums (kept as strings; validated in reducers) ----------
@@ -9,7 +9,6 @@ const PHASES = ['detect', 'analyze', 'contain', 'eradicate', 'recover', 'post_in
 const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 const SCOPE_STATUSES = ['encrypted', 'exfiltrated', 'accessed', 'unknown', 'clear'] as const;
 const FRAUD_STATUSES = ['open', 'frozen', 'dismissed'] as const;
-<<<<<<< HEAD
 const PRIVILEGED_ROLES = ['admin', 'incident_lead', 'legal'];
 
 // Every table is private. Clients read only through the views at the bottom,
@@ -21,8 +20,6 @@ const owner = table(
     identity: t.identity(),
   }
 );
-=======
->>>>>>> 172c600 (feat(spacetime): publish breach-room module and generate client bindings)
 
 const user = table(
   {},
@@ -147,8 +144,34 @@ const auditLog = table(
   }
 );
 
+// Stolen customers counted by US state: drives the notification map.
+// Filled by the Nessie importer (Lane C) from customer addresses, or by the drill.
+const stateImpact = table(
+  {},
+  {
+    id: t.u64().primaryKey().autoInc(),
+    incidentId: t.u64().index(),
+    state: t.string(), // 2-letter code
+    records: t.u64(),
+    since: t.timestamp(), // when these records were first known stolen; deadlines count from here
+  }
+);
+
+// Pending steps of a running attack drill; each row fires runDrillStep at its time.
+const drillStep = table(
+  {},
+  {
+    scheduledId: t.u64().primaryKey().autoInc(),
+    scheduledAt: t.scheduleAt(),
+    incidentId: t.u64(),
+    step: t.u32(),
+  }
+);
+
 const db = schema({
   owner,
+  drillStep,
+  stateImpact,
   user,
   incident,
   timelineEvent,
@@ -192,6 +215,107 @@ function timeline(ctx: Ctx, incidentId: bigint, kind: string, text: string) {
 }
 
 const WRITERS = ['incident_lead', 'responder'];
+
+// ---------- Auto-rules (the app acts without a click) ----------
+// Guided steps per phase (NIST SP 800-61 lifecycle, bank flavour); created as tasks automatically.
+const GUIDED: Record<string, string[]> = {
+  detect: [
+    'Confirm the alert is real, not a false alarm',
+    'Write what you saw and when in the timeline',
+    'Page the incident lead and open this war room',
+  ],
+  analyze: [
+    'List every affected system and customer in What was hit',
+    'Copy logs and memory before anything is rebooted',
+    'Confirm with Legal that the deadline clocks are right',
+  ],
+  contain: [
+    'Unplug affected machines from the network, do not power them off',
+    'Reset passwords and keys for exposed accounts',
+    'Review every fraud alert: freeze or dismiss',
+  ],
+  eradicate: [
+    'Remove the malware and every attacker login',
+    'Patch the hole they came in through',
+    'Scan again to confirm no backdoors are left',
+  ],
+  recover: [
+    'Restore systems from clean, tested backups',
+    'Watch restored systems closely for 48 hours',
+    'Send customer notices once Legal approves',
+  ],
+  post_incident: [
+    'Hold a blameless review within two weeks',
+    'Write down what to change next time',
+    'Mark every legal deadline as filed',
+  ],
+};
+
+// Started automatically the first time data is marked stolen. Lane D: verify each rule before the demo.
+const LEGAL_RULES = [
+  { regime: 'bank_regulator', label: 'Bank regulator notice (36h)', hours: 36, minRecords: 0n },
+  { regime: 'sec_8k', label: 'SEC 8-K if material (4 business days)', hours: 96, minRecords: 0n },
+  { regime: 'tx_ag', label: 'Texas AG notice, 250+ Texans (30 days)', hours: 720, minRecords: 250n },
+  { regime: 'tx_customers', label: 'Customer notices, Texas (60 days)', hours: 1440, minRecords: 0n },
+];
+
+const AUTO_FREEZE_CENTS = 1_000_000n; // $10,000
+
+function addGuidedTasks(ctx: Ctx, incidentId: bigint, phase: string) {
+  const existing = new Set([...ctx.db.task.incidentId.filter(incidentId)].map(tk => tk.title));
+  for (const title of GUIDED[phase] ?? [])
+    if (!existing.has(title)) ctx.db.task.insert({ id: 0n, incidentId, title, phase, done: false, createdBy: ctx.sender });
+}
+
+function newIncident(ctx: Ctx, title: string, severity: string, kind: string) {
+  const inc = ctx.db.incident.insert({
+    id: 0n, title, severity, kind, phase: 'detect', detectedAt: ctx.timestamp, createdBy: ctx.sender,
+  });
+  for (const [name, privileged] of [['general', false], ['containment', false], ['legal', true], ['exec', false]] as const)
+    ctx.db.channel.insert({ id: 0n, incidentId: inc.id, name, privileged });
+  timeline(ctx, inc.id, 'note', `Incident declared: ${title} (${severity})`);
+  addGuidedTasks(ctx, inc.id, 'detect');
+  audit(ctx, 'create_incident', `${inc.id}: ${title}`);
+  return inc;
+}
+
+function startClock(ctx: Ctx, incidentId: bigint, regime: string, label: string, hours: number) {
+  const deadlineAt = new Timestamp(ctx.timestamp.microsSinceUnixEpoch + BigInt(hours) * 3_600_000_000n);
+  ctx.db.legalClock.insert({ id: 0n, incidentId, regime, label, startedAt: ctx.timestamp, deadlineAt, done: false });
+}
+
+function autoLegalClocks(ctx: Ctx, incidentId: bigint) {
+  const stolen = [...ctx.db.scopeItem.incidentId.filter(incidentId)]
+    .filter(s => s.status === 'exfiltrated')
+    .reduce((n, s) => n + s.recordsCount, 0n);
+  const running = new Set([...ctx.db.legalClock.incidentId.filter(incidentId)].map(c => c.regime));
+  for (const r of LEGAL_RULES) {
+    if (running.has(r.regime) || stolen < r.minRecords) continue;
+    startClock(ctx, incidentId, r.regime, r.label, r.hours);
+    timeline(ctx, incidentId, 'auto', `Legal clock started: ${r.label} (${stolen.toLocaleString()} records stolen)`);
+  }
+}
+
+type ScopeArgs = { incidentId: bigint; assetType: string; assetRef: string; label: string; status: string; recordsCount: bigint };
+function setScope(ctx: Ctx, args: ScopeArgs) {
+  oneOf(args.status, SCOPE_STATUSES, 'scope status');
+  const existing = [...ctx.db.scopeItem.incidentId.filter(args.incidentId)].find(s => s.assetRef === args.assetRef);
+  const row = { ...args, updatedAt: ctx.timestamp, updatedBy: ctx.sender };
+  if (existing) ctx.db.scopeItem.id.update({ ...row, id: existing.id });
+  else ctx.db.scopeItem.insert({ ...row, id: 0n });
+  timeline(ctx, args.incidentId, 'scope_change', `${args.label}: ${args.status}`);
+  if (args.status === 'exfiltrated') autoLegalClocks(ctx, args.incidentId);
+}
+
+type AlertArgs = { incidentId: bigint; accountRef: string; transferRef: string; amountCents: bigint; reason: string };
+function raiseAlert(ctx: Ctx, args: AlertArgs) {
+  const frozen = args.amountCents >= AUTO_FREEZE_CENTS;
+  const a = ctx.db.fraudAlert.insert({ ...args, id: 0n, status: frozen ? 'frozen' : 'open', createdAt: ctx.timestamp });
+  if (frozen) {
+    timeline(ctx, args.incidentId, 'auto', `Account ${args.accountRef} frozen: $${(args.amountCents / 100n).toLocaleString()} transfer over the $10,000 limit`);
+    audit(ctx, 'auto_freeze', `${a.id}: ${args.accountRef}`);
+  }
+}
 
 // ---------- Lifecycle ----------
 // Runs once on first publish; the sender is whoever published (the CLI identity).
@@ -243,13 +367,7 @@ export const createIncident = db.reducer(
   (ctx, { title, severity, kind }) => {
     requireRole(ctx, 'incident_lead');
     oneOf(severity, SEVERITIES, 'severity');
-    const inc = ctx.db.incident.insert({
-      id: 0n, title, severity, kind, phase: 'detect', detectedAt: ctx.timestamp, createdBy: ctx.sender,
-    });
-    for (const [name, privileged] of [['general', false], ['containment', false], ['legal', true], ['exec', false]] as const)
-      ctx.db.channel.insert({ id: 0n, incidentId: inc.id, name, privileged });
-    timeline(ctx, inc.id, 'note', `Incident declared: ${title} (${severity})`);
-    audit(ctx, 'create_incident', `${inc.id}: ${title}`);
+    newIncident(ctx, title, severity, kind);
   }
 );
 
@@ -259,6 +377,7 @@ export const setPhase = db.reducer({ incidentId: t.u64(), phase: t.string() }, (
   const inc = requireIncident(ctx, incidentId);
   ctx.db.incident.id.update({ ...inc, phase });
   timeline(ctx, incidentId, 'phase_change', `${inc.phase} -> ${phase}`);
+  addGuidedTasks(ctx, incidentId, phase);
   audit(ctx, 'set_phase', `${incidentId}: ${phase}`);
 });
 
@@ -311,12 +430,7 @@ export const upsertScopeItem = db.reducer(
   (ctx, args) => {
     requireRole(ctx, ...WRITERS);
     requireIncident(ctx, args.incidentId);
-    oneOf(args.status, SCOPE_STATUSES, 'scope status');
-    const existing = [...ctx.db.scopeItem.incidentId.filter(args.incidentId)].find(s => s.assetRef === args.assetRef);
-    const row = { ...args, updatedAt: ctx.timestamp, updatedBy: ctx.sender };
-    if (existing) ctx.db.scopeItem.id.update({ ...row, id: existing.id });
-    else ctx.db.scopeItem.insert({ ...row, id: 0n });
-    timeline(ctx, args.incidentId, 'scope_change', `${args.label}: ${args.status}`);
+    setScope(ctx, args);
   }
 );
 
@@ -326,7 +440,7 @@ export const raiseFraudAlert = db.reducer(
   (ctx, args) => {
     requireRole(ctx, ...WRITERS);
     requireIncident(ctx, args.incidentId);
-    ctx.db.fraudAlert.insert({ ...args, id: 0n, status: 'open', createdAt: ctx.timestamp });
+    raiseAlert(ctx, args);
   }
 );
 
@@ -346,8 +460,7 @@ export const startLegalClock = db.reducer(
   (ctx, { incidentId, regime, label, hours }) => {
     requireRole(ctx, 'legal', 'incident_lead');
     requireIncident(ctx, incidentId);
-    const deadlineAt = new Timestamp(ctx.timestamp.microsSinceUnixEpoch + BigInt(hours) * 3_600_000_000n);
-    ctx.db.legalClock.insert({ id: 0n, incidentId, regime, label, startedAt: ctx.timestamp, deadlineAt, done: false });
+    startClock(ctx, incidentId, regime, label, hours);
     timeline(ctx, incidentId, 'action', `Legal clock started: ${label}`);
   }
 );
@@ -358,6 +471,79 @@ export const completeLegalClock = db.reducer({ clockId: t.u64() }, (ctx, { clock
   if (!c) throw new SenderError('No such clock');
   ctx.db.legalClock.id.update({ ...c, done: true });
   audit(ctx, 'complete_legal_clock', c.label);
+});
+
+function setStateRecords(ctx: Ctx, incidentId: bigint, state: string, records: bigint) {
+  const code = state.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) throw new SenderError(`Invalid state: ${state}`);
+  const existing = [...ctx.db.stateImpact.incidentId.filter(incidentId)].find(r => r.state === code);
+  if (existing) ctx.db.stateImpact.id.update({ ...existing, records });
+  else ctx.db.stateImpact.insert({ id: 0n, incidentId, state: code, records, since: ctx.timestamp });
+}
+
+export const setStateImpact = db.reducer(
+  { incidentId: t.u64(), state: t.string(), records: t.u64() },
+  (ctx, { incidentId, state, records }) => {
+    requireRole(ctx, ...WRITERS);
+    requireIncident(ctx, incidentId);
+    setStateRecords(ctx, incidentId, state, records);
+  }
+);
+
+// ---------- Attack drill: a scripted attack that plays out live ----------
+// Each step runs `waitSec` after the previous one. Events go through the same helpers
+// as human actions, so the auto-rules (legal clocks, auto-freeze) fire on their own.
+const channelId = (ctx: Ctx, incidentId: bigint, name: string) =>
+  [...ctx.db.channel.incidentId.filter(incidentId)].find(c => c.name === name)!.id;
+const say = (ctx: Ctx, incidentId: bigint, channel: string, text: string) =>
+  ctx.db.message.insert({ id: 0n, channelId: channelId(ctx, incidentId, channel), sender: ctx.sender, text, sentAt: ctx.timestamp });
+
+const DRILL: { waitSec: number; run: (ctx: Ctx, id: bigint) => void }[] = [
+  { waitSec: 4, run: (ctx, id) => timeline(ctx, id, 'ioc', 'EDR alert: mass file encryption on core-db-01 (wiper/ransomware pattern)') },
+  { waitSec: 8, run: (ctx, id) => setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 'core-db-01', label: 'Core banking database', status: 'encrypted', recordsCount: 48_210n }) },
+  { waitSec: 8, run: (ctx, id) => say(ctx, id, 'general', 'Ransom note on core-db-01: 40 BTC within 72 hours or the customer data gets published.') },
+  { waitSec: 10, run: (ctx, id) => timeline(ctx, id, 'ioc', 'Outbound transfer of 3.1 GB from core-db-01 to 185.220.101.4 at 01:52') },
+  {
+    waitSec: 8,
+    run: (ctx, id) => {
+      // Who lives where, as the Nessie importer would report it from customer addresses.
+      for (const [st, n] of [['TX', 8_140n], ['CA', 2_960n], ['FL', 880n], ['NY', 410n], ['OK', 110n]] as const)
+        setStateRecords(ctx, id, st, n);
+      setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 's3://avon-exports', label: 'Customer PII export', status: 'exfiltrated', recordsCount: 12_500n });
+    },
+  },
+  { waitSec: 10, run: (ctx, id) => raiseAlert(ctx, { incidentId: id, accountRef: 'CHK-4471', transferRef: 'TX-90211', amountCents: 240_000n, reason: 'New payee, 02:41 AM' }) },
+  { waitSec: 7, run: (ctx, id) => raiseAlert(ctx, { incidentId: id, accountRef: 'SAV-1093', transferRef: 'TX-90218', amountCents: 1_875_000n, reason: 'New payee, 02:44 AM, compromised account' }) },
+  { waitSec: 7, run: (ctx, id) => raiseAlert(ctx, { incidentId: id, accountRef: 'CHK-2286', transferRef: 'TX-90230', amountCents: 2_400_000n, reason: 'Wire to new payee, 02:47 AM' }) },
+  { waitSec: 8, run: (ctx, id) => setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 'olb-web-02', label: 'Online banking login server', status: 'accessed', recordsCount: 3_200n }) },
+  { waitSec: 6, run: (ctx, id) => timeline(ctx, id, 'note', 'Drill script finished. The attacker is still inside: your move.') },
+];
+
+function scheduleStep(ctx: Ctx, incidentId: bigint, step: number) {
+  const at = ctx.timestamp.microsSinceUnixEpoch + BigInt(DRILL[step].waitSec) * 1_000_000n;
+  ctx.db.drillStep.insert({ scheduledId: 0n, scheduledAt: ScheduleAt.time(at), incidentId, step });
+}
+
+export const startDrill = db.reducer(ctx => {
+  requireRole(ctx, 'incident_lead');
+  const inc = newIncident(ctx, 'DRILL: Ransomware at First Avon Bank', 'critical', 'ransomware');
+  say(ctx, inc.id, 'general', 'Drill started. Treat everything below as real.');
+  scheduleStep(ctx, inc.id, 0);
+});
+
+export const stopDrill = db.reducer(ctx => {
+  requireRole(ctx, 'incident_lead');
+  for (const row of [...ctx.db.drillStep.iter()]) {
+    ctx.db.drillStep.scheduledId.delete(row.scheduledId);
+    timeline(ctx, row.incidentId, 'note', 'Drill stopped.');
+  }
+});
+
+export const runDrillStep = db.reducer({ onSchedule: drillStep }, { row: drillStep.rowType }, (ctx, { row }) => {
+  if (!ctx.senderAuth.isInternal) throw new SenderError('Drill steps run on the schedule only');
+  if (!ctx.db.incident.id.find(row.incidentId)) return;
+  DRILL[row.step].run(ctx, row.incidentId);
+  if (row.step + 1 < DRILL.length) scheduleStep(ctx, row.incidentId, row.step + 1);
 });
 
 // ---------- Views: the only way clients read data ----------
@@ -394,6 +580,9 @@ export const legalClocks = db.view({ name: 'legalClocks', public: true }, t.arra
 );
 export const fraudAlerts = db.view({ name: 'fraudAlerts', public: true }, t.array(fraudAlert.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.fraudAlert.iter()] : []
+);
+export const stateImpacts = db.view({ name: 'stateImpacts', public: true }, t.array(stateImpact.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.stateImpact.iter()] : []
 );
 export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
   roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []

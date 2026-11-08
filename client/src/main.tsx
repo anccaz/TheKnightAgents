@@ -4,7 +4,7 @@ import { SpacetimeDBProvider } from 'spacetimedb/react';
 import { DbConnection, tables } from './module_bindings';
 import { ToastProvider } from './components/Toast';
 import App from './App';
-import './styles.css';
+import './index.css';
 
 const TOKEN_KEY = 'breach-room:auth-token';
 const uri = import.meta.env.VITE_SPACETIME_URI ?? 'https://maincloud.spacetimedb.com';
