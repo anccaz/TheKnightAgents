@@ -9,6 +9,17 @@ import { cn } from '@/lib/utils';
 import IncidentPage from '@/pages/incident/IncidentPage';
 import FeedPage from '@/pages/feed/FeedPage';
 import TeamPage, { JoinScreen } from '@/pages/team/TeamPage';
+import HomePage from '@/pages/home/HomePage';
+
+// Show the home screen once per browser tab; the brand button brings it back.
+const HOME_KEY = 'breach-room:entered';
+const entered = () => {
+  try {
+    return sessionStorage.getItem(HOME_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
 
 // Three pages. Simple state router: no router dependency.
 const PAGES = {
@@ -55,11 +66,28 @@ export default function App() {
   const me = useMe();
   const incident = useCurrentIncident();
   const [page, setPage] = useState<PageKey>('incident');
+  const [home, setHome] = useState(() => !entered());
+  const enter = (show: boolean) => {
+    try {
+      sessionStorage.setItem(HOME_KEY, show ? '' : '1');
+    } catch {}
+    setHome(show);
+  };
 
   const online = users.filter(u => u.online);
   const visible = (Object.keys(PAGES) as PageKey[]).filter(k => !PAGES[k].adminOnly || me?.role === 'admin');
   const current = visible.includes(page) ? page : 'incident';
   const { Page } = PAGES[current];
+
+  if (home)
+    return (
+      <div className="min-h-screen text-foreground">
+        <Background />
+        <div className="relative z-10">
+          <HomePage onEnter={() => enter(false)} />
+        </div>
+      </div>
+    );
 
   return (
     <div className="min-h-screen text-foreground">
@@ -67,9 +95,9 @@ export default function App() {
       <div className="relative z-10">
       <header className="sticky top-0 z-20 border-b border-border bg-card">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <span className="font-heading text-xl font-bold tracking-[0.25em] text-white">
+          <button onClick={() => enter(true)} title="Home" className="font-heading text-xl font-bold tracking-[0.25em] text-white">
             KNIGHT<span className="text-magenta">//</span>AGENT
-          </span>
+          </button>
           {incident ? (
             <span className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="rounded border border-border px-2 py-0.5 font-mono text-xs text-muted-foreground" title="Incident ID">
