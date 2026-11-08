@@ -4,7 +4,5 @@ dist/
 .env.local
 *.log
 .DS_Store
-
-# Nessie seed/import run data (local, regenerated each run)
-scripts/seed-output.json
-scripts/import-state.json
+.env
+client/.env
