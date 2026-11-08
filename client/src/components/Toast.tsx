@@ -32,7 +32,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={run}>
       {children}
-      <div className="fixed right-4 bottom-4 z-50 flex max-w-sm flex-col gap-2" role="status" aria-live="assertive">
+      <div className="fixed top-20 right-4 z-50 flex max-w-sm flex-col gap-2" role="status" aria-live="assertive">
         {toasts.map(t => (
           <div key={t.id} className={`glass flex items-start gap-2 px-3 py-2 text-sm ${t.ok ? 'border-ok/60' : 'border-sev-critical/70'}`}>
             <strong className={t.ok ? 'text-ok' : 'text-sev-critical'}>{t.ok ? 'Done' : 'Failed'}</strong>

@@ -39,6 +39,7 @@ import AddTaskReducer from "./add_task_reducer";
 import AddTimelineEventReducer from "./add_timeline_event_reducer";
 import CompleteLegalClockReducer from "./complete_legal_clock_reducer";
 import CreateIncidentReducer from "./create_incident_reducer";
+import LogAdvisorActionReducer from "./log_advisor_action_reducer";
 import RaiseFraudAlertReducer from "./raise_fraud_alert_reducer";
 import SendMessageReducer from "./send_message_reducer";
 import SetFraudAlertStatusReducer from "./set_fraud_alert_status_reducer";
@@ -55,6 +56,7 @@ import ToggleTaskReducer from "./toggle_task_reducer";
 import UpsertScopeItemReducer from "./upsert_scope_item_reducer";
 
 // Import all procedure arg schemas
+import * as AskAdvisorProcedure from "./ask_advisor_procedure";
 import * as DraftNoticeProcedure from "./draft_notice_procedure";
 
 // Import all table schema definitions
@@ -176,6 +178,7 @@ const reducersSchema = __reducers(
   __reducerSchema("add_timeline_event", AddTimelineEventReducer),
   __reducerSchema("complete_legal_clock", CompleteLegalClockReducer),
   __reducerSchema("create_incident", CreateIncidentReducer),
+  __reducerSchema("log_advisor_action", LogAdvisorActionReducer),
   __reducerSchema("raise_fraud_alert", RaiseFraudAlertReducer),
   __reducerSchema("send_message", SendMessageReducer),
   __reducerSchema("set_fraud_alert_status", SetFraudAlertStatusReducer),
@@ -194,6 +197,7 @@ const reducersSchema = __reducers(
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
 const proceduresSchema = __procedures(
+  __procedureSchema("ask_advisor", AskAdvisorProcedure.params, AskAdvisorProcedure.returnType),
   __procedureSchema("draft_notice", DraftNoticeProcedure.params, DraftNoticeProcedure.returnType),
 );
 

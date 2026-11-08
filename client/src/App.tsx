@@ -3,6 +3,7 @@ import { useSpacetimeDB, useTable } from 'spacetimedb/react';
 import { Radio, ShieldAlert, Users } from 'lucide-react';
 import { tables } from '@/module_bindings';
 import GradientASCII from '@/components/GradientASCII';
+import AdvisorWidget from '@/components/AdvisorWidget';
 import { PHASE_LABEL, ROLE_LABEL, SeverityChip, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
 import { cn } from '@/lib/utils';
 import IncidentPage from '@/pages/incident/IncidentPage';
@@ -117,6 +118,7 @@ export default function App() {
         )}
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6">{me ? <Page /> : <JoinScreen />}</main>
+      {me && <AdvisorWidget />}
       </div>
     </div>
   );
