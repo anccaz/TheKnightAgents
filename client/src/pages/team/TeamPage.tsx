@@ -18,6 +18,7 @@ const ACTION_LABEL: Record<string, string> = {
   fraud_alert_status: 'Fraud alert decided',
   auto_freeze: 'Account auto-frozen',
   complete_legal_clock: 'Deadline filed',
+  notice_sent: 'Notice sent',
 };
 
 /** Shown to anyone who isn't a member yet: the only way in is an admin adding this ID. */

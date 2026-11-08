@@ -137,29 +137,18 @@ Skip: reducing to 3 roles.
 
 ## Lane B: incident, live feed, notice chart, demo (owner: Sameeraa)
 
-**Finished:** Incident page, Live Feed, Team page UI; drill + auto-rules; notice priority chart; per-notice drafted/sent; theme.
+**Finished:** Incident page, Live Feed, Team page UI; drill + auto-rules; notice priority chart; per-notice drafted/sent; theme; automatic status updates in #exec (execUpdate: phase, records stolen, states affected, notices sent, next deadline, money frozen - on phase change, data stolen in the drill, notice sent); README refresh; docs/demo-script.md.
 
 ```text
 You own Lane B: Incident page, Live Feed, the notice priority chart, and the demo.
 Files: client/src/pages/incident/*, client/src/pages/feed/*, client/src/components/NotifyPriorityChart.tsx,
-README demo section, docs/demo-script.md (new). Small backend additions OK (tell Lane A).
+README demo section, docs/demo-script.md.
 
-Still to do, in order:
-1. Auto status updates to #exec: in the module, after setPhase and after a drill step marks data stolen, post a
-   message in the incident's 'exec' channel: "Phase: Contain · 12,500 records stolen · N notices owed, M sent ·
-   next deadline in 1d 11h · $42,750 frozen". Build it in a helper (execUpdate) using existing tables; sender =
-   ctx.sender. Add a test.
-2. README refresh: 3-page flow (Incident / Live Feed / Team), how to run the drill, notice chart + Mark sent,
-   Maincloud vs local setup, first-admin command.
-3. docs/demo-script.md: 3-minute script per sponsor -
-   Winstead: join by ID (no passwords), roles, run drill, legal clocks start by themselves, "Who must we tell first"
-   chart, mark Texas AG drafted -> sent, audit log shows it.
-   Spacetime: "there is no server": every rule is a reducer, every screen a live subscription, the drill is a
-   scheduled reducer, views enforce who sees what.
-   Capital One: Nessie customers' states fill the notice chart, Nessie withdrawals/bills raise fraud alerts,
-   $10k+ auto-freezes (depends on Lane C importer).
-4. Record a backup screen video of the drill on Maincloud (two browsers side by side to show live sync).
-5. Merge lane-b -> main after each tested chunk; ask Lane A to republish Maincloud when the backend changed.
+Still to do:
+1. Record a backup screen video of the drill on Maincloud following docs/demo-script.md (two browsers side by side:
+   admin + exec viewer, to show live sync and #legal hidden from the viewer).
+2. Rehearse the three sponsor scripts in docs/demo-script.md; adjust timings to the real drill.
+3. Merge lane-b -> main after each tested change; ask Lane A to republish Maincloud whenever the backend changed.
 ```
 
 ---
