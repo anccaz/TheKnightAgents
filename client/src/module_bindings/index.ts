@@ -55,6 +55,7 @@ import ToggleTaskReducer from "./toggle_task_reducer";
 import UpsertScopeItemReducer from "./upsert_scope_item_reducer";
 
 // Import all procedure arg schemas
+import * as DraftNoticeProcedure from "./draft_notice_procedure";
 
 // Import all table schema definitions
 import AuditEntriesRow from "./audit_entries_table";
@@ -193,6 +194,7 @@ const reducersSchema = __reducers(
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
 const proceduresSchema = __procedures(
+  __procedureSchema("draft_notice", DraftNoticeProcedure.params, DraftNoticeProcedure.returnType),
 );
 
 /** The remote SpacetimeDB module schema, both runtime and type information. */

@@ -1,13 +1,14 @@
 // "Who must we tell first?" Each bubble is one notice the bank owes.
 // x = time left (log days, left = due soonest), y = people affected (log), size = people, color = who is told.
 import { useEffect, useMemo, useState } from 'react';
-import { useReducer, useTable } from 'spacetimedb/react';
-import { reducers, tables } from '@/module_bindings';
+import { useProcedure, useReducer, useTable } from 'spacetimedb/react';
+import { procedures, reducers, tables } from '@/module_bindings';
 import { countdown, obligationsFor, stateName } from '@/lib/notifyRules';
 import { useRun } from '@/components/Toast';
-import { can, useMe } from '@/components/shared';
+import { can, PRIVILEGED, useMe } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Sparkles } from 'lucide-react';
 
 // Validated with the dataviz palette checker on the #0b0f22 panel (CVD ΔE 18.4, contrast >= 3:1).
 const COLOR = { customers: '#1f9ad8', authorities: '#ff2d6f' } as const;
@@ -33,6 +34,8 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
   const me = useMe();
   const setNotifyStatus = useReducer(reducers.setNotifyStatus);
   const completeLegalClock = useReducer(reducers.completeLegalClock);
+  const draftNotice = useProcedure(procedures.draftNotice);
+  const [drafting, setDrafting] = useState<string | null>(null);
   const run = useRun();
   const [now, setNow] = useState(Date.now());
   const [hover, setHover] = useState<string | null>(null);
@@ -51,13 +54,13 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
     for (const r of rows) {
       const people = Number(r.records);
       for (const o of obligationsFor(r.state, people, r.since.toDate())) {
-        const ag = o.who === 'Attorney General';
+        const kind = o.who === 'Attorney General' ? 'AG' : o.who === 'Credit bureaus' ? 'CRA' : null;
         out.push({
           id: `${r.state}-${o.who}`,
-          label: `${stateName(r.state)} ${ag ? 'Attorney General' : 'customers'}`,
-          short: ag ? `${r.state} AG` : r.state,
+          label: `${stateName(r.state)} ${kind === 'AG' ? 'Attorney General' : kind === 'CRA' ? 'credit bureaus' : 'customers'}`,
+          short: kind ? `${r.state} ${kind}` : r.state,
           who: o.who,
-          group: ag ? 'authorities' : 'customers',
+          group: kind ? 'authorities' : 'customers',
           people,
           due: o.dueAt,
           rule: o.text,
@@ -87,6 +90,15 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
     if (status === 'sent' && !window.confirm(`Mark "${n.label}" as sent? This is recorded in the audit log.`)) return;
     run(setNotifyStatus({ incidentId, notice: n.id, label: n.label, status }), `${n.label}: ${STATUS_LABEL[status]}`);
     if (status === 'sent' && n.clockId != null) run(completeLegalClock({ clockId: n.clockId }));
+  };
+
+  // Gemini writes the letter on the server (key never reaches the browser); it lands in #legal as "drafted".
+  const draftWithAi = (n: Notice) => {
+    setDrafting(n.id);
+    const due = n.due ? n.due.toLocaleDateString() : 'as soon as possible';
+    const call = draftNotice({ incidentId, notice: n.id, label: n.label, people: BigInt(n.people), rule: n.rule, due });
+    run(call, `${n.label}: AI draft posted in #legal for review`);
+    call.finally(() => setDrafting(null)).catch(() => {});
   };
 
   const maxPeople = Math.max(10, ...notices.map(n => n.people));
@@ -140,7 +152,7 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
             {(['customers', 'authorities'] as const).map(g => (
               <span key={g} className="flex items-center gap-1.5">
                 <span className="inline-block size-2.5 rounded-full" style={{ background: COLOR[g] }} />
-                {g === 'customers' ? 'Customers' : 'Authorities (AG, regulator, SEC)'}
+                {g === 'customers' ? 'Customers' : 'Authorities (AG, regulator, SEC, credit bureaus)'}
               </span>
             ))}
           </div>
@@ -262,6 +274,12 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
               </button>
               {picked === n.id && can(me, NOTIFIERS) && (
                 <div className="mt-1 mb-1 flex flex-wrap gap-1.5 pl-5">
+                  {n.status !== 'sent' && can(me, PRIVILEGED) && (
+                    <Button size="sm" variant="outline" disabled={drafting != null} onClick={() => draftWithAi(n)}>
+                      <Sparkles aria-hidden="true" />
+                      {drafting === n.id ? 'Drafting…' : n.status === 'drafted' ? 'Redraft with AI' : 'Draft with AI'}
+                    </Button>
+                  )}
                   {n.status === 'not_started' && (
                     <Button size="sm" variant="outline" onClick={() => mark(n, 'drafted')}>Mark drafted</Button>
                   )}
@@ -275,7 +293,7 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
               )}
             </li>
           ))}
-          {notices.length > 0 && <li className="pt-1 text-xs text-muted-foreground">State rules: verify before relying on them. Not legal advice.</li>}
+          {notices.length > 0 && <li className="pt-1 text-xs text-muted-foreground">Rules and AI drafts: verify before relying on them. Not legal advice. A person must review and click Mark sent.</li>}
         </ol>
       </div>
     </section>

@@ -1,7 +1,7 @@
 // Breach Room: SpacetimeDB module. This file IS the data contract.
 // Only Lane A edits table definitions; others ask A for new fields.
 import { schema, table, t, SenderError, ScheduleAt } from 'spacetimedb/server';
-import { Timestamp } from 'spacetimedb';
+import { Timestamp, TimeDuration } from 'spacetimedb';
 
 // ---------- Enums (kept as strings; validated in reducers) ----------
 const ROLES = ['admin', 'incident_lead', 'responder', 'legal', 'exec_viewer'] as const;
@@ -209,25 +209,36 @@ const drillStep = table(
   }
 );
 
-const db = schema({
-  owner,
-  drillStep,
-  stateImpact,
-  notifyStatus,
-  phaseAdvance,
-  phaseHold,
-  autopilotStep,
-  user,
-  incident,
-  timelineEvent,
-  scopeItem,
-  task,
-  channel,
-  message,
-  legalClock,
-  fraudAlert,
-  auditLog,
-});
+const db = schema(
+  {
+    owner,
+    drillStep,
+    stateImpact,
+    notifyStatus,
+    phaseAdvance,
+    phaseHold,
+    autopilotStep,
+    user,
+    incident,
+    timelineEvent,
+    scopeItem,
+    task,
+    channel,
+    message,
+    legalClock,
+    fraudAlert,
+    auditLog,
+  },
+  {
+    // Private database config, set at publish time (never in git or the client):
+    //   GEMINI_API_KEY=... npm run publish:local
+    // Optional so the module still publishes without it; draftNotice explains what to do if it is missing.
+    env: {
+      GEMINI_API_KEY: t.string().optional(),
+      GEMINI_MODEL: t.string().optional(),
+    },
+  }
+);
 export default db;
 
 // ---------- Helpers ----------
@@ -296,13 +307,32 @@ const GUIDED: Record<string, string[]> = {
   ],
 };
 
-// Started automatically the first time data is marked stolen. Lane D: verify each rule before the demo.
-const LEGAL_RULES = [
-  { regime: 'bank_regulator', label: 'Bank regulator notice (36h)', hours: 36, minRecords: 0n },
-  { regime: 'sec_8k', label: 'SEC 8-K if material (4 business days)', hours: 96, minRecords: 0n },
+// Started automatically the first time data is marked stolen (our stand-in for "the bank determined it").
+// NOT LEGAL ADVICE: checked against sources on 2026-11-07, Legal must re-verify before relying on them.
+// - bank_regulator: OCC 12 CFR 53, Fed 12 CFR 225 subpart N, FDIC 12 CFR 304 subpart C (computer-security incident
+//   notification rule, in force 2022-05-01): tell the primary federal regulator as soon as possible and no later than
+//   36 hours after determining a "notification incident" occurred.
+// - sec_8k: Form 8-K Item 1.05 (public companies only): 4 BUSINESS days after the incident is determined material,
+//   not after discovery. We count 4 weekdays from now; federal holidays are not skipped.
+// - tx_*: Tex. Bus. & Com. Code 521.053: individuals within 60 days (b); AG within 30 days if 250+ Texans (i).
+const LEGAL_RULES: { regime: string; label: string; hours?: number; businessDays?: number; minRecords: bigint }[] = [
+  { regime: 'bank_regulator', label: 'Bank regulator notice (36h, OCC/Fed/FDIC)', hours: 36, minRecords: 0n },
+  { regime: 'sec_8k', label: 'SEC 8-K if material (4 business days)', businessDays: 4, minRecords: 0n },
   { regime: 'tx_ag', label: 'Texas AG notice, 250+ Texans (30 days)', hours: 720, minRecords: 250n },
   { regime: 'tx_customers', label: 'Customer notices, Texas (60 days)', hours: 1440, minRecords: 0n },
 ];
+
+/** Hours from `from` until the same time-of-day `days` weekdays later (UTC; holidays not skipped). */
+function businessDaysToHours(from: Timestamp, days: number) {
+  const d = new Date(Number(from.microsSinceUnixEpoch / 1000n));
+  let left = days, hours = 0;
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    hours += 24;
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) left--;
+  }
+  return hours;
+}
 
 const AUTO_FREEZE_CENTS = 1_000_000n; // $10,000
 
@@ -336,7 +366,7 @@ function autoLegalClocks(ctx: Ctx, incidentId: bigint) {
   const running = new Set([...ctx.db.legalClock.incidentId.filter(incidentId)].map(c => c.regime));
   for (const r of LEGAL_RULES) {
     if (running.has(r.regime) || stolen < r.minRecords) continue;
-    startClock(ctx, incidentId, r.regime, r.label, r.hours);
+    startClock(ctx, incidentId, r.regime, r.label, r.hours ?? businessDaysToHours(ctx.timestamp, r.businessDays!));
     timeline(ctx, incidentId, 'auto', `Legal clock started: ${r.label} (${stolen.toLocaleString()} records stolen)`);
   }
 }
@@ -662,18 +692,8 @@ export const setStateImpact = db.reducer(
   }
 );
 
-export const setNotifyStatus = db.reducer(
-  { incidentId: t.u64(), notice: t.string(), label: t.string(), status: t.string() },
-  (ctx, { incidentId, notice, label, status }) => {
-    requireRole(ctx, 'incident_lead', 'responder', 'legal');
-    requireIncident(ctx, incidentId);
-    oneOf(status, NOTICE_STATUSES, 'notice status');
-    setNotice(ctx, incidentId, notice, label, status);
-    progress(ctx, incidentId);
-  }
-);
-
 function setNotice(ctx: Ctx, incidentId: bigint, notice: string, label: string, status: string) {
+  oneOf(status, NOTICE_STATUSES, 'notice status');
   const existing = [...ctx.db.notifyStatus.incidentId.filter(incidentId)].find(n => n.notice === notice);
   const row = { incidentId, notice, status, updatedAt: ctx.timestamp, updatedBy: ctx.sender };
   if (existing) ctx.db.notifyStatus.id.update({ ...row, id: existing.id });
@@ -681,9 +701,200 @@ function setNotice(ctx: Ctx, incidentId: bigint, notice: string, label: string, 
   timeline(ctx, incidentId, 'action', `Notice ${status === 'sent' ? 'sent' : status === 'drafted' ? 'drafted' : 'reopened'}: ${label}`);
   if (status === 'sent') {
     audit(ctx, 'notice_sent', label);
-    execUpdate(ctx, incidentId);
+    execUpdate(ctx, incidentId); // Lane B: post a status line to #exec
   }
 }
+
+export const setNotifyStatus = db.reducer(
+  { incidentId: t.u64(), notice: t.string(), label: t.string(), status: t.string() },
+  (ctx, { incidentId, notice, label, status }) => {
+    requireRole(ctx, 'incident_lead', 'responder', 'legal');
+    requireIncident(ctx, incidentId);
+    setNotice(ctx, incidentId, notice, label, status);
+    progress(ctx, incidentId);
+  }
+);
+
+// ---------- AI notice draft (Lane D): Gemini writes, a human sends ----------
+// Runs as a procedure because reducers cannot make HTTP calls. The API key comes from the database's
+// private environment, so it never reaches a client. Only aggregate facts go to Gemini (counts, data types,
+// dates), never customer names or account numbers. The draft lands in privileged #legal and the notice
+// becomes "drafted"; a person still reviews it and clicks Mark sent.
+const clip = (s: string, n: number) => s.slice(0, n).replace(/[\r\n]+/g, ' ');
+const fmtDate = (ts: Timestamp) => new Date(Number(ts.microsSinceUnixEpoch / 1000n)).toISOString().slice(0, 10);
+
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
+
+/** Fallback letter when Gemini is unavailable: same facts, fixed wording, unknowns left in [BRACKETS]. */
+function templateNotice(f: { label: string; rule: string; due: string; people: bigint; title: string; detected: string; stolen: string }) {
+  return [
+    'DRAFT - PRIVILEGED & CONFIDENTIAL - NOT LEGAL ADVICE',
+    `To: ${f.label}   (${f.rule}; deadline ${f.due})`,
+    '',
+    'Notice of Data Breach',
+    '',
+    `What happened: On ${f.detected}, [BANK NAME] detected a security incident (${f.title}). An unauthorized party accessed and copied data from our systems.`,
+    `What information was involved: ${f.stolen}. About ${f.people.toLocaleString()} people in this group are affected. [CONFIRM DATA TYPES: names, SSNs, account numbers, ...]`,
+    'What we are doing: We contained the incident, engaged forensic experts, notified law enforcement and our regulators, and are strengthening our systems.',
+    'What you can do: Review your account statements and credit reports (free at annualcreditreport.com). You can place a free fraud alert or security freeze with Equifax (1-800-685-1111), Experian (1-888-397-3742) and TransUnion (1-888-909-8872). [OFFER OF CREDIT MONITORING, IF ANY]',
+    'For more information: Call [PHONE] or write to [ADDRESS].',
+  ].join('\n');
+}
+
+/**
+ * From a ListModels response, text models to try in order: stable "gemini-X-flash" (newest first), then other
+ * Flash variants (incl. lite), then any other Gemini text model. Speech/image/live models are skipped.
+ */
+function rankGeminiModels(res: { ok: boolean; json(): any }): string[] {
+  if (!res.ok) return [];
+  const models = ((res.json()?.models ?? []) as { name: string; supportedGenerationMethods?: string[] }[])
+    .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+    .map(m => m.name.replace(/^models\//, ''))
+    .filter(n => /^gemini-\d/.test(n) && !/(tts|image|audio|live|embedding|preview|exp)/.test(n));
+  const version = (n: string) => parseFloat(n.match(/^gemini-(\d+(?:\.\d+)?)/)?.[1] ?? '0');
+  // Stable Flash-Lite first: a form letter does not need more, Lite answers in seconds, and the newest full
+  // Flash is often overloaded (gemini-3.8-flash hung 60-90s in testing). Then stable Flash, then anything else.
+  const tier = (n: string) => (/^gemini-[\d.]+-flash-lite$/.test(n) ? 0 : /^gemini-[\d.]+-flash$/.test(n) ? 1 : 2);
+  return models.sort((a, b) => tier(a) - tier(b) || version(b) - version(a));
+}
+
+// Google answers 429/500/503 when a model is overloaded; those are worth a retry, 4xx otherwise are not.
+const GEMINI_RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const GEMINI_MAX_CALLS = 3; // models tried per click; a healthy Lite model answers in a few seconds
+const GEMINI_CALL_TIMEOUT_MS = 12_000; // a busy model hangs rather than failing fast: give up and try the next
+let lastGoodModel: string | null = null; // best-effort cache; resets when the module instance restarts
+// Turn "thinking" down: a form letter does not need it, and it made gemini-3.8-flash take over 60s per draft.
+type ThinkingConfig = { thinkingBudget: number } | { thinkingLevel: string } | null;
+const THINKING_OPTIONS: ThinkingConfig[] = [{ thinkingBudget: 0 }, { thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }, null];
+const THINKING_OK = new Map<string, ThinkingConfig>();
+
+export const draftNotice = db.procedure(
+  { incidentId: t.u64(), notice: t.string(), label: t.string(), people: t.u64(), rule: t.string(), due: t.string() },
+  t.string(),
+  (ctx, args) => {
+    const notice = clip(args.notice, 80), label = clip(args.label, 120), rule = clip(args.rule, 200), due = clip(args.due, 60);
+
+    // 1. Check access and gather facts in a read transaction.
+    const facts = ctx.withTx(tx => {
+      requireRole(tx, ...PRIVILEGED_ROLES); // the draft goes into privileged #legal
+      const inc = requireIncident(tx, args.incidentId);
+      const stolen = [...tx.db.scopeItem.incidentId.filter(args.incidentId)].filter(s => s.status === 'exfiltrated');
+      return {
+        title: inc.title,
+        kind: inc.kind,
+        detected: fmtDate(inc.detectedAt),
+        stolen: stolen.map(s => `${s.label} (${s.recordsCount.toLocaleString()} records)`).join('; ') || 'not yet confirmed',
+      };
+    });
+
+    const key = ctx.env.GEMINI_API_KEY;
+    if (!key) throw new SenderError('AI drafting is off: publish the module with GEMINI_API_KEY set (see README).');
+    const model = ctx.env.GEMINI_MODEL || null; // unset = pick the newest stable Flash this key can use
+
+    // 2. Ask Gemini (outside any transaction: HTTP is not allowed inside withTx).
+    const prompt = [
+      'You are drafting a data breach notification for a US bank. Write the full letter, ready for a lawyer to review.',
+      `Recipient: ${label}. Who must be told and when: ${rule}; deadline ${due}.`,
+      `People affected: ${args.people.toLocaleString()}.`,
+      `Incident: ${facts.title} (${facts.kind}), detected ${facts.detected}.`,
+      `Data stolen: ${facts.stolen}.`,
+      'Include what the law for this recipient requires: what happened and when, what personal information was involved,',
+      'what the bank is doing, what the reader can do (credit freeze, fraud alert, free credit reports, the major credit bureaus\' contact details),',
+      'and a contact phone number and address. Use [BRACKETS] for any fact you do not know; never invent one.',
+      'Plain language, no markdown, under 350 words. Put "DRAFT - PRIVILEGED & CONFIDENTIAL - NOT LEGAL ADVICE" on the first line.',
+    ].join('\n');
+
+    // Speed: no "thinking" (a form letter does not need it), a capped length, a short per-call timeout and an overall
+    // budget, so a click answers in seconds. If a model rejects the thinking setting (HTTP 400), retry it once without.
+    const body = (thinking: ThinkingConfig) =>
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 1200, ...(thinking ? { thinkingConfig: thinking } : {}) },
+      });
+    type Res = { ok: boolean; status: number; json(): any };
+    const call = (m: string, thinking: ThinkingConfig): Res => {
+      try {
+        return ctx.http.fetch(`${GEMINI_API}/models/${encodeURIComponent(m)}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          body: body(thinking),
+          timeout: TimeDuration.fromMillis(GEMINI_CALL_TIMEOUT_MS),
+        });
+      } catch {
+        return { ok: false, status: 504, json: () => null }; // timed out / network error: treat like "busy"
+      }
+    };
+    // Older models take thinkingBudget, newer ones thinkingLevel; a 400 means "not this one", so try the next.
+    // The setting that worked is remembered per model, so later clicks make a single call.
+    const generate = (m: string): Res => {
+      const start = THINKING_OK.has(m) ? THINKING_OPTIONS.indexOf(THINKING_OK.get(m)!) : 0;
+      let r: Res = { ok: false, status: 400, json: () => null };
+      for (const thinking of THINKING_OPTIONS.slice(start)) {
+        r = call(m, thinking);
+        if (r.status !== 400) {
+          THINKING_OK.set(m, thinking);
+          break;
+        }
+      }
+      return r;
+    };
+
+    // Order: GEMINI_MODEL if set, else the model that last worked (remembered while this module instance lives),
+    // then the ranked list this key can use (fetched only if needed). One quick retry per model when it is busy.
+    let candidates: string[] | null = null;
+    const first = model ?? lastGoodModel;
+    const queue = first ? [first] : [];
+    const tried = new Set<string>();
+    let res: Res | null = null;
+    let usedModel = first ?? '', calls = 0;
+    while (calls < GEMINI_MAX_CALLS) {
+      const m = queue.shift();
+      if (!m) {
+        if (candidates) break;
+        candidates = rankGeminiModels(ctx.http.fetch(`${GEMINI_API}/models?pageSize=200`, { headers: { 'x-goog-api-key': key } }));
+        queue.push(...candidates.filter(c => !tried.has(c)));
+        continue;
+      }
+      if (tried.has(m)) continue;
+      tried.add(m);
+      usedModel = m;
+      res = generate(m);
+      calls++;
+      console.log(`draftNotice: ${m} -> HTTP ${res.status}`);
+      if (res.ok) {
+        lastGoodModel = m;
+        break;
+      }
+      if (m === lastGoodModel) lastGoodModel = null;
+      if (res.status !== 404 && !GEMINI_RETRYABLE.has(res.status)) break; // bad key, quota, bad request: don't hop models
+    }
+    // Never echo the response body on error: it is logged to the caller and could include request details.
+    // A bad key / quota (4xx) is a setup problem: say so. If Gemini is just busy or down, fall back to a fixed
+    // template so the responder still gets a draft in seconds, clearly marked as not AI-written.
+    if (res && !res.ok && res.status !== 404 && !GEMINI_RETRYABLE.has(res.status))
+      throw new SenderError(`Gemini request failed (HTTP ${res.status}, model ${usedModel}). Check the API key and quota.`);
+    const data = res?.ok ? (res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] }) : null;
+    const aiText = data?.candidates?.[0]?.content?.parts?.map(p => p.text ?? '').join('').trim();
+    const draft = aiText || templateNotice({ label, rule, due, people: args.people, ...facts });
+    const header = aiText
+      ? `AI draft (${usedModel}) for ${label}, review before sending:`
+      : `Template draft for ${label} (Gemini unavailable: ${[...tried].join(', ') || 'no model'}), review and fill the [BRACKETS]:`;
+
+    // 3. Post into #legal and mark the notice drafted, atomically.
+    ctx.withTx(tx => {
+      requireRole(tx, ...PRIVILEGED_ROLES);
+      const legal = [...tx.db.channel.incidentId.filter(args.incidentId)].find(c => c.name === 'legal');
+      if (!legal) throw new SenderError('This incident has no #legal channel');
+      tx.db.message.insert({
+        id: 0n, channelId: legal.id, sender: tx.sender, sentAt: tx.timestamp,
+        text: `${header}\n\n${draft}`,
+      });
+      setNotice(tx, args.incidentId, notice, label, 'drafted');
+      audit(tx, aiText ? 'notice_ai_draft' : 'notice_template_draft', label);
+    });
+    return draft;
+  }
+);
 
 // ---------- Attack drill: a scripted attack that plays out live ----------
 // Each step runs `waitSec` after the previous one. Events go through the same helpers

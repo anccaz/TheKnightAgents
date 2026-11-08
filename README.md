@@ -37,6 +37,16 @@ Install the SpacetimeDB CLI first: https://spacetimedb.com/install
    ```
    then `cd client && npm install && npm run dev`.
 
+**AI notice drafts (optional, Gemini).** The key lives in the database's private environment, never in git or the browser:
+```bash
+cd spacetimedb
+export GEMINI_API_KEY=<your key>   # from https://aistudio.google.com/apikey
+npm run publish:local              # or publish:cloud; the CLI picks up declared env vars from the shell
+# change only the key later, without republishing code:
+spacetime publish --server http://127.0.0.1:3010 breach-room --env-only
+```
+By default it uses the newest stable Flash-Lite model your key has; set `GEMINI_MODEL=<name>` to pin one. If Gemini is busy it posts a labeled template draft instead; without a key the button shows an error and everything else works.
+
 **First admin.** Open the app, click **Copy my ID**, then the person who published the database runs:
 ```bash
 # Git Bash / macOS / Linux (and PowerShell 7.3+)

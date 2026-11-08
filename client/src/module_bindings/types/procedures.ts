@@ -6,5 +6,8 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all procedure arg schemas
+import * as DraftNoticeProcedure from "../draft_notice_procedure";
 
+export type DraftNoticeArgs = __Infer<typeof DraftNoticeProcedure.params>;
+export type DraftNoticeResult = __Infer<typeof DraftNoticeProcedure.returnType>;
 
