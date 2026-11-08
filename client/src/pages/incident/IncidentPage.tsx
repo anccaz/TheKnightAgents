@@ -2,7 +2,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { Identity } from 'spacetimedb';
 import { useProcedure, useReducer, useTable } from 'spacetimedb/react';
-import { BarChart3, Check, FilePlus, CircleHelp, Download, Eye, Lock, Play, Radar, ShieldCheck, Snowflake, Square, ThumbsUp, UserCheck, Zap, type LucideIcon } from 'lucide-react';
+import { BarChart3, Check, FilePlus, CircleHelp, Download, Eye, LayoutGrid, Lock, MessagesSquare, Play, Radar, ShieldCheck, Snowflake, Square, ThumbsUp, UserCheck, Zap, type LucideIcon } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import ConversationView from './ConversationView';
 import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import AfterActionSummary from '@/components/AfterActionSummary';
@@ -51,8 +53,62 @@ export default function IncidentPage() {
   const [showSummary, setShowSummary] = useState(false);
   // "New incident": show the declare form over this one. Once a newer incident exists, this id no longer matches and it closes.
   const [freshFrom, setFreshFrom] = useState<bigint | null>(null);
+  const [mode, setMode] = useState<'conversation' | 'classic'>(() => {
+    try {
+      return localStorage.getItem('breach-room:view') === 'classic' ? 'classic' : 'conversation';
+    } catch {
+      return 'conversation';
+    }
+  });
+  const pickMode = (m: 'conversation' | 'classic') => {
+    setMode(m);
+    try {
+      localStorage.setItem('breach-room:view', m);
+    } catch {
+      /* private window: keep it for this visit only */
+    }
+  };
   if (!incident) return <DeclareForm />;
   if (freshFrom === incident.id) return <DeclareForm onCancel={() => setFreshFrom(null)} />;
+  const header = (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <p className="font-mono text-xs tracking-[0.3em] text-magenta uppercase">Active incident</p>
+        <h1 className="text-2xl font-bold break-words text-white sm:text-3xl">{incident.title}</h1>
+      </div>
+      <span className="flex flex-wrap items-center gap-2">
+        <Tabs value={mode} onValueChange={v => pickMode(v as 'conversation' | 'classic')}>
+          <TabsList>
+            <TabsTrigger value="conversation">
+              <MessagesSquare /> Conversation
+            </TabsTrigger>
+            <TabsTrigger value="classic">
+              <LayoutGrid /> Classic
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <DrillControls />
+        {can(me, LEADS) && (
+          <Button type="button" variant="outline" onClick={() => setFreshFrom(incident.id)}>
+            <FilePlus /> New incident
+          </Button>
+        )}
+        {mode === 'classic' && incident.phase !== 'post_incident' && (
+          <Button type="button" variant="outline" aria-pressed={showSummary} onClick={() => setShowSummary(v => !v)}>
+            <BarChart3 /> {showSummary ? 'Hide summary' : 'Summary'}
+          </Button>
+        )}
+      </span>
+    </div>
+  );
+  if (mode === 'conversation')
+    return (
+      <div className="flex flex-col gap-6">
+        <AgentTrigger incidentId={incident.id} phase={incident.phase} />
+        <section className="glass p-5">{header}</section>
+        <ConversationView incident={incident} />
+      </div>
+    );
   const summary = incident.phase === 'post_incident' || showSummary;
   // Sections appear as the incident moves on, so each phase only shows what it needs.
   const at = PHASES.indexOf(incident.phase as (typeof PHASES)[number]);
@@ -62,26 +118,9 @@ export default function IncidentPage() {
   );
   return (
     <div className="flex flex-col gap-6">
+      <AgentTrigger incidentId={incident.id} phase={incident.phase} />
       <section className="glass flex flex-col gap-4 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-mono text-xs tracking-[0.3em] text-magenta uppercase">Active incident</p>
-            <h1 className="text-2xl font-bold break-words text-white sm:text-3xl">{incident.title}</h1>
-          </div>
-          <span className="flex flex-wrap gap-2">
-            <DrillControls />
-            {can(me, LEADS) && (
-              <Button type="button" variant="outline" onClick={() => setFreshFrom(incident.id)}>
-                <FilePlus /> New incident
-              </Button>
-            )}
-            {incident.phase !== 'post_incident' && (
-              <Button type="button" variant="outline" aria-pressed={showSummary} onClick={() => setShowSummary(v => !v)}>
-                <BarChart3 /> {showSummary ? 'Hide summary' : 'Summary'}
-              </Button>
-            )}
-          </span>
-        </div>
+        {header}
         <PhaseStepper incidentId={incident.id} phase={incident.phase} />
       </section>
       <Detections incidentId={incident.id} />
@@ -224,7 +263,7 @@ function PhaseStepper({ incidentId, phase }: { incidentId: bigint; phase: string
 }
 
 /** "All tasks done: moving on in 27 s [Stay here]" while an automatic phase advance is pending. */
-function AutoAdvanceBanner({ incidentId }: { incidentId: bigint }) {
+export function AutoAdvanceBanner({ incidentId }: { incidentId: bigint }) {
   const me = useMe();
   const [advances] = useTable(tables.phaseAdvances);
   const stayInPhase = useReducer(reducers.stayInPhase);
@@ -342,7 +381,7 @@ function Detections({ incidentId }: { incidentId: bigint }) {
 }
 
 /** Pull the bank's customers and transactions from Capital One's Nessie API; the server scans the next batch of accounts. */
-function NessieImport({ incidentId }: { incidentId: bigint }) {
+export function NessieImport({ incidentId }: { incidentId: bigint }) {
   const me = useMe();
   const importFromNessie = useProcedure(procedures.importFromNessie);
   const runAutopilot = useReducer(reducers.runAutopilot);
@@ -394,15 +433,18 @@ function NessieImport({ incidentId }: { incidentId: bigint }) {
  * AI agents (Counsel, Comms) brief their channels once per phase. A lead's screen starts them when the phase changes;
  * the server makes sure it happens once. Each viewer only receives the briefings their role's channels allow.
  */
-function AgentsPanel({ incidentId, phase }: { incidentId: bigint; phase: string }) {
-  const me = useMe();
+function AgentTrigger({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+  const lead = can(useMe(), LEADS);
   const runAgents = useProcedure(procedures.runAgents);
-  const [channels] = useTable(tables.channels);
-  const [messages] = useTable(tables.messages);
-  const lead = can(me, LEADS);
   useEffect(() => {
     if (lead) runAgents({ incidentId }).catch(e => console.warn('AI agents:', e));
   }, [lead, incidentId, phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
+function AgentsPanel({ incidentId }: { incidentId: bigint; phase: string }) {
+  const [channels] = useTable(tables.channels);
+  const [messages] = useTable(tables.messages);
   const mine = new Map(channels.filter(c => c.incidentId === incidentId).map(c => [c.id, c.name]));
   const latest = ['Counsel', 'Comms']
     .map(name => messages.filter(m => mine.has(m.channelId) && m.text.startsWith(`🤖 ${name} agent`)).sort((a, b) => Number(b.id - a.id))[0])
@@ -429,7 +471,7 @@ function AgentsPanel({ incidentId, phase }: { incidentId: bigint; phase: string 
 }
 
 /** What the Nessie import brought in, as pictures: who is affected per state, how much of the bank was checked, what was flagged. */
-function NessiePanel({ incidentId }: { incidentId: bigint }) {
+export function NessiePanel({ incidentId }: { incidentId: bigint }) {
   const [cursors] = useTable(tables.nessieCursors);
   const [states] = useTable(tables.stateImpacts);
   const [scope] = useTable(tables.scopeItems);
@@ -508,7 +550,7 @@ function NessiePanel({ incidentId }: { incidentId: bigint }) {
 
 type Incident = NonNullable<ReturnType<typeof useCurrentIncident>>;
 
-function IncidentRecord({ incident }: { incident: Incident }) {
+export function IncidentRecord({ incident }: { incident: Incident }) {
   const [users] = useTable(tables.members);
   const [events] = useTable(tables.timelineEvents);
   const [scope] = useTable(tables.scopeItems);
@@ -553,7 +595,7 @@ function IncidentRecord({ incident }: { incident: Incident }) {
   );
 }
 
-function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+export function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
   const me = useMe();
   const [allTasks] = useTable(tables.tasks);
   const addTask = useReducer(reducers.addTask);
@@ -633,7 +675,7 @@ function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
   );
 }
 
-function Scope({ incidentId }: { incidentId: bigint }) {
+export function Scope({ incidentId }: { incidentId: bigint }) {
   const me = useMe();
   const [allItems] = useTable(tables.scopeItems);
   const upsertScopeItem = useReducer(reducers.upsertScopeItem);
