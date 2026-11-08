@@ -62,7 +62,7 @@ Port 3010 is used because 3000 is often taken; any free port works if you change
 
 **Switching between local and Maincloud.** `client/.env` decides the server. Delete or rename it (for example to `client/.env.local-dev`) to use Maincloud, then restart `npm run dev`. The browser keeps a separate login per server, so you may need to be added again by ID on the other one. If the app shows a rejected-login screen, it clears the bad token and reloads once by itself.
 
-**AI notice drafts and the incident advisor (optional, Gemini).** Both use the same key. It lives in the database's private environment, never in git or the browser:
+**AI notice drafts, the incident advisor and the AI agents (optional, Gemini).** All three use the same key. It lives in the database's private environment, never in git or the browser:
 ```bash
 cd spacetimedb
 export GEMINI_API_KEY=<your key>   # from https://aistudio.google.com/apikey
@@ -93,9 +93,11 @@ Drop `--server ...` to target Maincloud. CLI reducer names are snake_case (`add_
 Cloud publish: `spacetime login` then `npm run publish:cloud` in `spacetimedb/` (add `--delete-data` if a schema change is refused; demo data only). Re-add members by ID afterwards.
 
 ## The 3 pages
+**Home screen.** The first visit in a browser tab opens a splash page with the Knight Agent name drawn in moving particles (React Bits ParticleText) and **Enter command center**. Clicking the brand in the header returns to it.
+
 The header always shows the incident ID (for example `INC-2026-0005`, from the database id), the phase, severity, who is online and the connection state. The same ID is the first row of the **Incident record**.
 
-**Incident.** With no incident, fill in **What is happening?**, **How bad?** and **Type**, then click **Declare incident** (or **Run 2 AM drill**). Once declared: a 6-phase NIST stepper (Detect, Analyze, Contain, Remove threat, Recover, Lessons learned) with one big **Done with X: move to Y** button; **Incoming detections** (security alerts, systems hit and fraud, newest first, with a NEW tag and the source); the **Incident record** built from what has happened; **What do I do next?** (guided tasks for the current phase, plus **Add task**; Remove threat and Recover tasks use **I did this** / **Verify** sign-offs); **What was hit** (record counters, status per system, **Quick pick** of common bank systems, rows added by the drill or Nessie marked **Auto**); and **Fraud: needs a decision** with **Freeze** and **It's fine** per alert, plus the list of frozen accounts and whether a person or the system froze them.
+**Incident.** With no incident, fill in **What is happening?**, **How bad?** and **Type**, then click **Declare incident** (or **Run 2 AM drill**). Once declared: a 6-phase NIST stepper (Detect, Analyze, Contain, Remove threat, Recover, Lessons learned) with one big **Done with X: move to Y** button; **Incoming detections** (security alerts, systems hit and fraud, newest first, with a NEW tag and the source); the **Incident record** built from what has happened; **What do I do next?** (guided tasks for the current phase, plus **Add task**; Remove threat and Recover tasks use **I did this** / **Verify** sign-offs); **What was hit** (record counters, status per system, **Quick pick** of common bank systems, rows added by the drill or Nessie marked **Auto**); and **Fraud: needs a decision** with **Freeze** and **It's fine** per alert, plus the list of frozen accounts and whether a person or the system froze them. Sections appear as the incident moves on: What was hit opens in Analyze and Fraud in Contain, with a "Coming up" hint until then. After a Nessie import, **Bank data from Nessie** shows customers affected, accounts checked, a bar per state and the suspicious transactions. **AI agents** shows the latest Counsel and Comms briefings your role may see. Leads can start a fresh incident at any time with **New incident**; the old one stays on record.
 
 **Live Feed.** **Who must we tell first** at the top: a bubble chart of every notice owed (state customers, state Attorney General, bank regulator, SEC), placed by time left and people affected, with a notice queue where you click **Mark drafted**, **Mark sent** or **Reopen**. Below it, **Deadlines** (live countdowns, mark filed, **Start clock** for a custom one), then one merged feed of chat, timeline and security events with **All / Chat / Auto / Security** filters. The composer sends to the selected channel (#general, #containment, #legal for lawyers and leads only, #exec) or, with **Log as incident note**, writes to the timeline.
 
@@ -115,11 +117,12 @@ The app reacts on its own (shown as **Auto** in the feed):
 - **Autopilot drill.** **Autopilot** (next to Run 2 AM drill) plays the attack *and* the response: every few seconds it does the next unfinished task of the current phase (sign-offs are recorded as "Autopilot (drill)"; real incidents need two people), freezes open fraud alerts, sends the customer notices and files the deadlines, and walks the incident through all six phases in under a minute (the attack runs at double speed, a move every 2 seconds, 3-second phase countdowns). Good for the backup video and a looping demo screen.
 - **After-action summary.** Appears on the Incident page when the incident reaches Lessons learned (or any time via **Summary**): total time, time to contain, time per phase, records locked/stolen/seen, money frozen (automatic vs by a person), notices sent on time, deadlines filed, tasks done, and how much work was automatic vs by people vs advisor-confirmed. Computed from the existing record; no extra backend.
 - **Incident advisor (Gemini).** The **Advisor** button (bottom-left) opens a chat (bottom-right). Every answer is built on the server from this incident's live record only (tasks, timeline, what was hit, fraud alerts, deadlines, notices, chat your role may see), cites its sources as chips, and says "I don't have that in the incident record" instead of guessing. Citations the record doesn't contain are stripped. It can suggest up to 3 actions (complete a task, change phase, freeze/dismiss an alert, mark a notice drafted/sent, file a deadline, stay in phase); each opens a separate confirmation page showing what will run, why, and as whom, and needs a checkbox plus **Proceed**. Confirmed suggestions are logged as "Advisor suggestion confirmed by <name>". Without a Gemini key (or when Gemini is busy) it answers with a rule-based, facts-only summary.
+- **AI agents (Gemini).** Two agents brief the team once per phase, starting when the phase changes on an incident lead's screen (the server makes sure each phase is briefed only once). **Counsel** reads the incident as a lawyer would (deadlines, notices, record counts, never money) and posts in #legal: which deadlines are running, which notices to draft next, and one legal risk. **Comms** reads it as an executive (including money frozen) and posts in #exec: the situation, the money, and the next decision for leadership. Each agent gets only the facts its role may see, through the same filter as the advisor, and cites them with tags like `[D3]`. Agents advise and never act; each run is in the timeline and the audit log. Without Gemini they post a short "offline summary" built from the same facts. (Shortcut: the agent roles are applied by our code, not by member rows.)
 - **Status updates in #exec.** On a phase change, when data is stolen, and when a notice is sent, #exec gets a message like "Status update — Phase: Contain · 12,500 records stolen · 5 states affected · 1 notice sent · next deadline in 1d 11h · $42,750 frozen", so executives never have to ask.
 
 Rules live in `spacetimedb/src/index.ts`: `DRILL`, `LEGAL_RULES`, `AUTO_FREEZE_CENTS`, `GUIDED`. State notice rules live in `client/src/lib/notifyRules.ts`: checked rules for TX, CA, FL, NY, and unverified first drafts for the other Winstead PC office states GA, NC, TN (marked "Unverified" in the code). Any other state still shows, with a "not checked" default; the full list of state names there is only for labels. Legal rules are for the demo; verify before relying on them.
 
-Per-sponsor demo scripts: [docs/demo-script.md](docs/demo-script.md). A recorded 2.5-minute autopilot demo with voice-over exists locally in `demo/knight-agent-demo.mp4` (not committed; videos are too big for git, share it through Drive or Devpost).
+Per-sponsor demo scripts: [docs/demo-script.md](docs/demo-script.md). A recorded 2:19 demo with voice-over (autopilot drill, Live Feed, Nessie import, autopilot on Nessie data, need-to-know) exists locally in `demo/knight-agent-demo-v2.mp4` (not committed; videos are too big for git, share it through Drive or Devpost).
 
 ## Demo: real bank data from Nessie (Capital One)
 **In the app (one click).** On the Incident page, **Import from Nessie (Capital One)** sits in Incoming detections. The server (a SpacetimeDB procedure, like the Gemini calls) reads Nessie: customers by state fill **Who must we tell first**, their records are marked stolen (legal clocks start), and withdrawals/bills are scanned with the same fraud rule as the CLI importer. Procedures make HTTP calls one at a time, so each click checks the next 20 accounts plus the "hot" ones (the live `--plant` targets and accounts already flagged); click again for the next batch. Reruns never duplicate alerts. It needs `NESSIE_API_KEY` in the database environment (publish with it set, or `--env-only`). Tested locally: 786 customers in 6 states, 3 real planted withdrawals flagged in about 15 seconds. Live moment: run `node scripts/seed-nessie.mjs --plant`, then click **Check next accounts in Nessie**: the new withdrawal appears (and freezes if the team is in Contain).
@@ -156,6 +159,14 @@ node scripts/seed-nessie.mjs --plant                                         # t
 ```
 Reruns never duplicate alerts (progress is in `scripts/import-state.json`, per server and incident). After wiping a local database, add `--fresh`. Preview without network: `node scripts/seed-nessie.mjs --dry-run`. Tests: `node --test scripts/lib.test.mjs`.
 
+## Tech stack
+| Layer | What we use |
+|---|---|
+| Backend | SpacetimeDB 2.14 TypeScript module on Maincloud: private tables, per-role views, reducers, scheduled reducers (drill, autopilot, phase countdown), procedures with outbound HTTP (Gemini, Nessie). No separate app server. |
+| Frontend | React 18, TypeScript, Vite, Tailwind v4, shadcn/ui (Base UI), React Bits (GradientASCII background, ParticleText home screen), lucide icons, `spacetimedb/react` live subscriptions |
+| APIs | Capital One Nessie (customers, accounts, withdrawals, bills), Google Gemini Flash-Lite (advisor, AI agents, notice drafts) |
+| Testing and tooling | Vitest with SpacetimeDB's module test harness (29 tests), Node scripts for the Nessie seed and import, Playwright and neural text-to-speech for the demo video |
+
 ## Architecture
 There is no app server. The browser talks to SpacetimeDB directly over a websocket.
 - **Reducers** are the only way to write. Each one checks the caller's role first, then calls shared helpers that apply the auto-rules (clocks, freeze, guided tasks, #exec updates) inside the same transaction.
@@ -179,9 +190,10 @@ spacetimedb/              SpacetimeDB TypeScript module (tables, views, reducers
   src/index.ts            the whole backend and data contract
   src/advisor.ts          advisor prompt, citation and action checks, rule-based fallback
   src/nessie.ts           Nessie fraud rule and batching for the in-app import
-  test/                   vitest: roles, automation, advisor
+  test/                   vitest: roles, need-to-know, automation, advisor, AI agents, Nessie
 client/                   React 18 + Vite + Tailwind
-  src/App.tsx             header, 3 tabs, background
+  src/App.tsx             home screen, header, 3 tabs, background
+  src/pages/home/         ParticleText splash page
   src/pages/incident/     Incident page
   src/pages/feed/         Live Feed page
   src/pages/team/         Team page + join screen
@@ -196,7 +208,7 @@ docs/                     plan.md, agent-prompts.md, demo-script.md
 | Lane | Owner | Owns | Reducers |
 |---|---|---|---|
 | A | Annie | Access control, roles, audit log, views, Maincloud | `addMember` `setRole` `removeMember` |
-| B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `signOffTask` `sendMessage` `setNotifyStatus` `startDrill` `startAutopilotDrill` `runAutopilot` `stopDrill` `stayInPhase` `askAdvisor` `logAdvisorAction` |
+| B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `signOffTask` `sendMessage` `setNotifyStatus` `startDrill` `startAutopilotDrill` `runAutopilot` `stopDrill` `stayInPhase` `askAdvisor` `logAdvisorAction` `runAgents` |
 | C | Navya | Nessie seed and importer, scope, fraud watch | `importFromNessie` `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` `setStateImpact` |
 | D | Navya | Legal rules, Gemini drafts, Devpost, pitch | `startLegalClock` `completeLegalClock` `draftNotice` |
 
@@ -231,6 +243,7 @@ Tick boxes as you go (edit this file, commit, push). Deadlines: **initial Devpos
 - [x] Incident ID in the header and record
 - [x] Incident advisor (Gemini, cited, two-step confirm) and after-action summary
 - [x] Backup demo video with voice-over (recorded on the local DB, `demo/`, not committed)
+- [x] Home screen, New incident, Nessie panel, need-to-know views, AI agents (Counsel, Comms)
 - [ ] Optional: re-record on Maincloud with Gemini answers in the advisor
 
 ### Lane C: Nessie + scope + fraud
