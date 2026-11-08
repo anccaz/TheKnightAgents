@@ -1,4 +1,4 @@
-// State breach-notification rules used by the notification map.
+// State breach-notification rules used by the notice priority chart.
 // Lane D: VERIFY every rule against current statutes before the demo. Not legal advice.
 export type StateRule = {
   name: string;
@@ -54,12 +54,6 @@ const US_NAMES: Record<string, string> = {
   RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', UT: 'Utah', VT: 'Vermont', VA: 'Virginia',
   WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
 };
-
-// Full state name (as in the map data) -> 2-letter code.
-export const CODE_BY_NAME: Record<string, string> = Object.fromEntries([
-  ...Object.entries(US_NAMES).map(([code, name]) => [name, code]),
-  ...Object.entries(RULES).map(([code, r]) => [r.name, code]),
-]);
 
 export function countdown(due: Date | null, now: number) {
   if (!due) return 'ASAP';
