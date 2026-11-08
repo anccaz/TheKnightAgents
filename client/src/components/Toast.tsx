@@ -19,11 +19,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), ok ? 3000 : 8000);
   }, []);
 
+  // Procedures surface our own SenderError text wrapped as a "fatal error"; show just our words, and setup gaps plainly.
+  const friendly = (msg: string) => {
+    const m = msg.replace(/^.*?encountered a fatal error:\s*/i, '');
+    if (/Nessie is off/i.test(m)) return "Nessie isn't set up on this server yet. The database owner needs to publish with NESSIE_API_KEY set (see README).";
+    if (/AI drafting is off/i.test(m)) return "AI isn't set up on this server yet. The database owner needs to publish with GEMINI_API_KEY set (see README).";
+    return m;
+  };
+
   const run = useCallback<Run>(
     (call, okText) => {
       call.then(
         () => okText && push(okText, true),
-        (err: unknown) => push(err instanceof Error ? err.message : String(err), false)
+        (err: unknown) => push(friendly(err instanceof Error ? err.message : String(err)), false)
       );
     },
     [push]
