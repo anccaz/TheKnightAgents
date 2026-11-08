@@ -1,183 +1,309 @@
 // Lane A owner: join screen, add members by ID, roles, security events (audit log).
-import { useState, type FormEvent } from 'react';
+import { useState, useMemo, type FormEvent } from 'react';
 import { useReducer, useSpacetimeDB, useTable } from 'spacetimedb/react';
 import { Identity } from 'spacetimedb';
-import { Copy, ShieldCheck, UserPlus } from 'lucide-react';
+import { Copy, Check, ShieldCheck, UserPlus } from 'lucide-react';
 import { reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import { ROLES, ROLE_LABEL, useMe } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-const SELECT = 'h-8 rounded-lg border border-input bg-input/30 px-2 text-sm focus-visible:ring-3 focus-visible:ring-ring/50 outline-none';
-const ACTION_LABEL: Record<string, string> = {
-  add_member: 'Member added',
-  set_role: 'Role changed',
-  create_incident: 'Incident declared',
-  set_phase: 'Phase changed',
-  fraud_alert_status: 'Fraud alert decided',
-  auto_freeze: 'Account auto-frozen',
-  complete_legal_clock: 'Deadline filed',
-  notice_sent: 'Notice sent',
-};
+/* -------------------------------------------------------------------------- */
+/* Cryptographic Identity Chip Component                                      */
+/* -------------------------------------------------------------------------- */
 
-/** Shown to anyone who isn't a member yet: the only way in is an admin adding this ID. */
-export function JoinScreen() {
-  const { identity } = useSpacetimeDB();
-  const hex = identity?.toHexString() ?? '';
-  const run = useRun();
-  return (
-    <section className="glass mx-auto mt-10 max-w-xl space-y-4 p-6">
-      <h1 className="font-heading text-xl tracking-[0.2em] text-white uppercase">Join the response team</h1>
-      <p className="text-muted-foreground">
-        Send this ID to your admin over a channel you trust (phone, in person). They add you and this page opens by itself.
-      </p>
-      <label className="block space-y-1 text-sm font-medium">
-        Your ID
-        <Input readOnly value={hex} onFocus={e => e.target.select()} className="font-mono text-xs" />
-      </label>
-      <Button className="w-full" size="lg" disabled={!hex} onClick={() => run(navigator.clipboard.writeText(hex), 'ID copied')}>
-        <Copy className="size-4" /> Copy my ID
-      </Button>
-      <p className="text-xs text-muted-foreground">
-        First admin: whoever published the database runs <code className="text-neon">spacetime call … add_member</code> with this ID (see README).
-      </p>
-    </section>
-  );
+interface IdentityChipCardProps {
+  identityHex: string;
+  name?: string;
+  role?: string;
 }
 
-export default function TeamPage() {
-  const me = useMe();
-  const [users] = useTable(tables.members);
-  const [log] = useTable(tables.auditEntries);
-  const setRole = useReducer(reducers.setRole);
-  const run = useRun();
-  const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? 'Breach Room';
-  const [action, setAction] = useState('all');
-  const sorted = [...log].sort((a, b) => (a.id < b.id ? 1 : -1));
-  const actions = [...new Set(sorted.map(e => e.action))];
-  const events = action === 'all' ? sorted : sorted.filter(e => e.action === action);
-  const admin = me?.role === 'admin';
+export function IdentityChipCard({ identityHex, name, role }: IdentityChipCardProps) {
+  const [copied, setCopied] = useState(false);
+
+  // Deterministically compute an 8x8 boolean matrix (64 bits) from the hex identity string
+  const grid = useMemo(() => {
+    const raw = identityHex.replace(/^0x/, '').padEnd(64, '0');
+    const bits: boolean[] = [];
+    for (let i = 0; i < 64; i++) {
+      const val = parseInt(raw[i] || '0', 16);
+      bits.push(val % 2 === 1);
+    }
+    return bits;
+  }, [identityHex]);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(identityHex);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const formattedShortId = identityHex.length > 18
+    ? `${identityHex.slice(0, 10)}...${identityHex.slice(-6)}`
+    : identityHex;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div className="space-y-6">
-        {admin && <AddMemberForm />}
-        <section className="glass p-4">
-          <h2 className="mb-3 font-heading text-sm tracking-[0.2em] text-white uppercase">Members ({users.length})</h2>
-          <ul className="divide-y divide-border">
-            {users.map(u => (
-              <li key={u.identity.toHexString()} className="flex flex-wrap items-center gap-3 py-2">
-                <span className={u.online ? 'text-ok' : 'text-muted-foreground'} aria-label={u.online ? 'online' : 'offline'}>
-                  {u.online ? '●' : '○'}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="font-medium">{u.name}</span> <span className="text-sm text-muted-foreground">{u.email}</span>
-                </span>
-                {admin ? (
-                  <select
-                    aria-label={`Role for ${u.name}`}
-                    className={SELECT}
-                    value={u.role}
-                    onChange={e => run(setRole({ target: u.identity, role: e.target.value }), `${u.name}: ${ROLE_LABEL[e.target.value]}`)}
-                  >
-                    {ROLES.map(r => (
-                      <option key={r} value={r}>{ROLE_LABEL[r]}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="text-sm text-muted-foreground">{ROLE_LABEL[u.role] ?? u.role}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
+    <div className="border border-border bg-card p-4 font-mono text-xs">
+      {/* Top Banner */}
+      <div className="flex items-center justify-between border-b border-border pb-2.5 mb-3.5">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="size-4 text-neon" />
+          <span className="font-heading uppercase tracking-widest text-white text-xs font-bold">
+            Operator Clearance Badge
+          </span>
+        </div>
+        <span className="border border-border bg-black/60 px-2 py-0.5 text-[10px] text-muted-foreground uppercase tracking-wider">
+          Asymmetric WASM Identity
+        </span>
       </div>
 
-      <section className="glass p-4">
-        <h2 className="mb-1 flex items-center gap-2 font-heading text-sm tracking-[0.2em] text-white uppercase">
-          <ShieldCheck className="size-4" /> Security events
-        </h2>
-        <p className="mb-3 text-xs text-muted-foreground">Append-only record of who did what. Admins only.</p>
-        {sorted.length > 0 && (
-          <label className="mb-3 flex items-center gap-2 text-sm">
-            Show
-            <select aria-label="Filter security events" className={SELECT} value={action} onChange={e => setAction(e.target.value)}>
-              <option value="all">All events ({sorted.length})</option>
-              {actions.map(a => (
-                <option key={a} value={a}>{ACTION_LABEL[a] ?? a}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {events.length === 0 && <p className="text-sm text-muted-foreground italic">Nothing recorded yet.</p>}
-        <ol className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
-          {events.map(e => (
-            <li key={e.id.toString()} className="rounded-lg border border-magenta/30 bg-accent/20 px-3 py-2 text-sm">
-              <div className="flex justify-between gap-2">
-                <b>{ACTION_LABEL[e.action] ?? e.action}</b>
-                <time className="font-mono text-xs text-muted-foreground">{e.at.toDate().toLocaleString()}</time>
-              </div>
-              <div className="text-muted-foreground">
-                {e.detail} · by {nameOf(e.actor.toHexString())}
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        {/* 8x8 Hardware Silicon Microchip Visualization */}
+        <div className="shrink-0 p-1 bg-black border border-border">
+          <div className="grid grid-cols-8 gap-[1px] w-16 h-16 bg-zinc-950">
+            {grid.map((active, idx) => (
+              <div
+                key={idx}
+                className={active ? 'bg-neon' : 'bg-black'}
+                title={`Bit ${idx}: ${active ? '1' : '0'}`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Tactical Key Telemetry */}
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Operator:</span>
+            <span className="text-white font-bold tracking-wider truncate">{name || 'PENDING ADMISSION'}</span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Clearance:</span>
+            <span className="text-neon uppercase font-bold tracking-wider">
+              {role ? (ROLE_LABEL[role] ?? role).toUpperCase() : 'UNAUTHENTICATED GUEST'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Key ID:</span>
+            <span className="text-zinc-400 font-mono text-[11px] truncate" title={identityHex}>
+              {formattedShortId}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 pt-1 border-t border-border/40 text-[10px]">
+            <span className="text-muted-foreground uppercase tracking-wider">Auth Engine:</span>
+            <span className="text-zinc-500 font-mono tracking-tight">ASYMMETRIC KEYPAIR // WASM BOUND</span>
+          </div>
+        </div>
+
+        {/* Tactical Action Button */}
+        <div className="shrink-0 self-stretch sm:self-auto flex items-end">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 border border-neon bg-neon/10 px-3.5 py-2 text-neon text-xs font-mono uppercase tracking-wider hover:bg-neon hover:text-black transition-colors"
+          >
+            {copied ? (
+              <>
+                <Check className="size-3.5 text-neon" />
+                <span>COPIED // ZERO SECRETS STORED</span>
+              </>
+            ) : (
+              <>
+                <Copy className="size-3.5" />
+                <span>COPY RAW KEY</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
-function AddMemberForm() {
-  const addMember = useReducer(reducers.addMember);
-  const run = useRun();
-  const [form, setForm] = useState({ id: '', name: '', email: '', role: 'responder' });
-  const [error, setError] = useState('');
+/* -------------------------------------------------------------------------- */
+/* Unauthenticated Join Screen                                               */
+/* -------------------------------------------------------------------------- */
 
-  const submit = (e: FormEvent) => {
+export function JoinScreen() {
+  const { identity } = useSpacetimeDB();
+  const identityHex = identity ? identity.toHexString() : '';
+
+  return (
+    <div className="mx-auto max-w-xl space-y-6 pt-12">
+      <div className="border border-border bg-card p-6 space-y-4">
+        <div>
+          <h2 className="font-heading text-lg font-bold uppercase tracking-wider text-white">
+            Air-Gapped Access Gateway
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Access to this incident panic room requires cryptographic identity whitelisting by an active Incident Lead or Admin.
+          </p>
+        </div>
+
+        {identityHex && (
+          <IdentityChipCard identityHex={identityHex} role="Pending Admission" />
+        )}
+
+        <div className="text-[11px] text-zinc-500 font-mono border-t border-border/40 pt-3">
+          Provide your public Key ID above to an administrator out-of-band (via encrypted signal or physical verification) to be provisioned.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Authenticated Team Page                                                    */
+/* -------------------------------------------------------------------------- */
+
+export default function TeamPage() {
+  const { identity } = useSpacetimeDB();
+  const [members] = useTable(tables.members);
+  const [auditLogs] = useTable(tables.auditEntries);
+  const me = useMe();
+  const run = useRun();
+
+  const addMemberCall = useReducer(reducers.addMember);
+  const setRoleCall = useReducer(reducers.setRole);
+
+  const [newId, setNewId] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newRole, setNewRole] = useState('responder');
+
+  const handleAddMember = async (e: FormEvent) => {
     e.preventDefault();
-    let target: Identity;
+    if (!newId || !newName || !newEmail) return;
+
     try {
-      target = Identity.fromString(form.id.trim());
-    } catch {
-      setError('That ID is not valid. Ask them to copy it again.');
-      return;
+      const cleanHex = newId.trim().replace(/^0x/, '');
+      const parsedIdentity = Identity.fromString(cleanHex);
+      await run(() => addMemberCall({ identity: parsedIdentity, name: newName.trim(), email: newEmail.trim(), role: newRole }));
+      setNewId('');
+      setNewName('');
+      setNewEmail('');
+    } catch (err: any) {
+      console.error(err);
     }
-    setError('');
-    run(addMember({ target, name: form.name, email: form.email, role: form.role }), `${form.name} added`);
-    setForm({ id: '', name: '', email: '', role: 'responder' });
+  };
+
+  const handleRoleChange = async (memberIdentity: Identity, role: string) => {
+    await run(() => setRoleCall({ identity: memberIdentity, role }));
   };
 
   return (
-    <form className="glass space-y-3 p-4" onSubmit={submit}>
-      <h2 className="flex items-center gap-2 font-heading text-sm tracking-[0.2em] text-white uppercase">
-        <UserPlus className="size-4" /> Add someone
-      </h2>
-      <label className="block space-y-1 text-sm font-medium">
-        Their ID
-        <Input required value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} className="font-mono text-xs" />
-      </label>
-      {error && <p role="alert" className="text-sm font-semibold text-sev-medium">{error}</p>}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block space-y-1 text-sm font-medium">
-          Name
-          <Input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          Email
-          <Input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-        </label>
-      </div>
-      <label className="block space-y-1 text-sm font-medium">
-        Role
-        <select className={`${SELECT} w-full`} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
-          {ROLES.map(r => (
-            <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+    <div className="space-y-6">
+      {/* Operator Credential Card */}
+      {identity && (
+        <IdentityChipCard
+          identityHex={identity.toHexString()}
+          name={me?.name}
+          role={me?.role}
+        />
+      )}
+
+      {/* Add Member Form (Admin Only) */}
+      {me?.role === 'admin' && (
+        <div className="border border-border bg-card p-4 space-y-4 font-mono text-xs">
+          <div className="flex items-center gap-2 border-b border-border pb-2.5">
+            <UserPlus className="size-4 text-neon" />
+            <h3 className="font-heading uppercase tracking-wider text-white text-xs font-bold">
+              Provision Zero-Trust Operator
+            </h3>
+          </div>
+
+          <form onSubmit={handleAddMember} className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <Input
+              placeholder="0x Identity Hex"
+              value={newId}
+              onChange={e => setNewId(e.target.value)}
+              className="font-mono text-xs bg-black/40 border-border"
+              required
+            />
+            <Input
+              placeholder="Operator Name"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              className="font-mono text-xs bg-black/40 border-border"
+              required
+            />
+            <Input
+              placeholder="Corporate Email"
+              type="email"
+              value={newEmail}
+              onChange={e => setNewEmail(e.target.value)}
+              className="font-mono text-xs bg-black/40 border-border"
+              required
+            />
+            <div className="flex gap-2">
+              <select
+                value={newRole}
+                onChange={e => setNewRole(e.target.value)}
+                className="flex-1 bg-black/60 border border-border px-2 text-xs text-white font-mono"
+              >
+                {ROLES.map(r => (
+                  <option key={r} value={r}>
+                    {ROLE_LABEL[r] ?? r}
+                  </option>
+                ))}
+              </select>
+              <Button type="submit" variant="outline" className="border-neon text-neon hover:bg-neon hover:text-black">
+                Add
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Roster Table */}
+      <div className="border border-border bg-card p-4 space-y-3 font-mono text-xs">
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <h3 className="font-heading uppercase tracking-wider text-white text-xs font-bold">
+            Active Roster ({members.length})
+          </h3>
+        </div>
+
+        <div className="divide-y divide-border">
+          {members.map(m => (
+            <div key={m.identity.toHexString()} className="py-2.5 flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className={m.online ? 'text-ok' : 'text-zinc-600'}>●</span>
+                  <span className="font-bold text-white">{m.name}</span>
+                  <span className="text-zinc-500">({m.email})</span>
+                </div>
+                <div className="text-[11px] text-zinc-500 truncate max-w-sm">
+                  {m.identity.toHexString()}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {me?.role === 'admin' ? (
+                  <select
+                    value={m.role}
+                    onChange={e => handleRoleChange(m.identity, e.target.value)}
+                    className="bg-black/60 border border-border px-2 py-1 text-xs text-neon font-mono"
+                  >
+                    {ROLES.map(r => (
+                      <option key={r} value={r}>
+                        {ROLE_LABEL[r] ?? r}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="border border-border px-2 py-0.5 text-zinc-400">
+                    {ROLE_LABEL[m.role] ?? m.role}
+                  </span>
+                )}
+              </div>
+            </div>
           ))}
-        </select>
-      </label>
-      <Button type="submit" size="lg" className="w-full">Add member</Button>
-    </form>
+        </div>
+      </div>
+    </div>
   );
 }
