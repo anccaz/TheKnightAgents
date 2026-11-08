@@ -25,7 +25,17 @@ Verified from https://nessieisreal.com/docs.
 ## How Knight Agent uses it
 1. `scripts/seed-nessie.mjs [--reset] [--count N]` creates "First Avon Bank": 260 fake customers across TX/CA/FL/NY/OK with accounts, withdrawals and bills, plus 6 planted fraud items (3 withdrawals >= $10k that auto-freeze, 3 new-payee bills $5.5-9.5k that wait for a decision; all 2-4 AM, on accounts funded to cover them) and 5 clean "live target" accounts. Writes `scripts/seed-output.json`. `--plant` adds one live fraud withdrawal for the demo.
 2. `scripts/import-nessie.mjs --incident <id> [--server maincloud] [--watch]` pushes it into an incident through `spacetime call`: `set_state_impact` per state (fills the notice chart), one aggregate customer scope item (starts legal clocks), account scope items + `raise_fraud_alert` for suspicious activity (>= $10,000 auto-freezes server-side). Progress is kept in `scripts/import-state.json` per server/db/incident so reruns don't duplicate; `--fresh` forgets it (e.g. after wiping a local database).
-3. The CLI identity must be a member (`incident_lead` or `responder`); an admin adds it by ID in Team.
+3. The CLI identity must be a member; an admin adds it by ID in Team. `responder` can import; creating an incident needs `incident_lead` or `admin`.
+4. Import into a **clean** incident, never a drill one (drill numbers mix in). The UI only shows the declare form when no incident exists, so create one from the CLI: `spacetime call --server maincloud breach-room create_incident '"Nessie import test"' '"critical"' '"data_theft"'`. The app always shows the newest incident; header `INC-2026-0005` = ID 5.
+5. Verified result (Maincloud, incident 5): states TX 162 / CA 40 / FL 25 / NY 22 / OK 11; 6 alerts, the $20,412 / $17,069 / $21,848 withdrawals auto-frozen, 3 bills open; clocks bank_regulator, sec_8k, tx_ag, tx_customers; `--watch` + `--plant` raised a live frozen alert within ~10 s.
+
+## Gotchas
+- **Order for the live demo:** start `--watch` first, then `--plant`. A plant made before the watcher starts is picked up by the first scan, so it doesn't look live.
+- **Wrong server in the browser:** `client/.env` usually has `VITE_SPACETIME_URI=ws://127.0.0.1:3010` (local). Big drill-like numbers (TX 8,140) mean you're looking at local. Run the client with `VITE_SPACETIME_URI=wss://maincloud.spacetimedb.com npm run dev`.
+- **Access gateway on Maincloud:** each server gives the browser a different identity. Copy the raw key and add it with `add_member` (args: identity `"0x..."`, name, email, role).
+- **Private tables in `spacetime sql`:** query the views (`fraudAlerts`, `legalClocks`, `scopeItems`, `stateImpacts`, `incidents`), not the tables.
+- **TX AG mismatch:** the `tx_ag` clock fires on 250+ stolen records total; the chart's TX AG bubble needs 250+ Texans. With 162 Texans you get the clock, not the bubble.
+- Nessie ids are UUIDs, not 24-hex ObjectIds.
 
 ## Rules
 - Seed data is synthetic. No real names/SSNs; use obviously fake names.
