@@ -6,8 +6,11 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all procedure arg schemas
+import * as AskAdvisorProcedure from "../ask_advisor_procedure";
 import * as DraftNoticeProcedure from "../draft_notice_procedure";
 
+export type AskAdvisorArgs = __Infer<typeof AskAdvisorProcedure.params>;
+export type AskAdvisorResult = __Infer<typeof AskAdvisorProcedure.returnType>;
 export type DraftNoticeArgs = __Infer<typeof DraftNoticeProcedure.params>;
 export type DraftNoticeResult = __Infer<typeof DraftNoticeProcedure.returnType>;
 

@@ -2,6 +2,7 @@
 // Only Lane A edits table definitions; others ask A for new fields.
 import { schema, table, t, SenderError, ScheduleAt } from 'spacetimedb/server';
 import { Timestamp, TimeDuration } from 'spacetimedb';
+import { ADVISOR_SCHEMA, advisorPrompt, checkReply, left, ruleBasedReply, type AdvisorFacts } from './advisor';
 
 // ---------- Enums (kept as strings; validated in reducers) ----------
 const ROLES = ['admin', 'incident_lead', 'responder', 'legal', 'exec_viewer'] as const;
@@ -768,50 +769,22 @@ type ThinkingConfig = { thinkingBudget: number } | { thinkingLevel: string } | n
 const THINKING_OPTIONS: ThinkingConfig[] = [{ thinkingBudget: 0 }, { thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }, null];
 const THINKING_OK = new Map<string, ThinkingConfig>();
 
-export const draftNotice = db.procedure(
-  { incidentId: t.u64(), notice: t.string(), label: t.string(), people: t.u64(), rule: t.string(), due: t.string() },
-  t.string(),
-  (ctx, args) => {
-    const notice = clip(args.notice, 80), label = clip(args.label, 120), rule = clip(args.rule, 200), due = clip(args.due, 60);
+type GeminiRes = { ok: boolean; status: number; json(): any };
+type HttpCtx = { http: { fetch(url: string, init?: any): any } };
 
-    // 1. Check access and gather facts in a read transaction.
-    const facts = ctx.withTx(tx => {
-      requireRole(tx, ...PRIVILEGED_ROLES); // the draft goes into privileged #legal
-      const inc = requireIncident(tx, args.incidentId);
-      const stolen = [...tx.db.scopeItem.incidentId.filter(args.incidentId)].filter(s => s.status === 'exfiltrated');
-      return {
-        title: inc.title,
-        kind: inc.kind,
-        detected: fmtDate(inc.detectedAt),
-        stolen: stolen.map(s => `${s.label} (${s.recordsCount.toLocaleString()} records)`).join('; ') || 'not yet confirmed',
-      };
-    });
-
-    const key = ctx.env.GEMINI_API_KEY;
-    if (!key) throw new SenderError('AI drafting is off: publish the module with GEMINI_API_KEY set (see README).');
-    const model = ctx.env.GEMINI_MODEL || null; // unset = pick the newest stable Flash this key can use
-
-    // 2. Ask Gemini (outside any transaction: HTTP is not allowed inside withTx).
-    const prompt = [
-      'You are drafting a data breach notification for a US bank. Write the full letter, ready for a lawyer to review.',
-      `Recipient: ${label}. Who must be told and when: ${rule}; deadline ${due}.`,
-      `People affected: ${args.people.toLocaleString()}.`,
-      `Incident: ${facts.title} (${facts.kind}), detected ${facts.detected}.`,
-      `Data stolen: ${facts.stolen}.`,
-      'Include what the law for this recipient requires: what happened and when, what personal information was involved,',
-      'what the bank is doing, what the reader can do (credit freeze, fraud alert, free credit reports, the major credit bureaus\' contact details),',
-      'and a contact phone number and address. Use [BRACKETS] for any fact you do not know; never invent one.',
-      'Plain language, no markdown, under 350 words. Put "DRAFT - PRIVILEGED & CONFIDENTIAL - NOT LEGAL ADVICE" on the first line.',
-    ].join('\n');
-
+/**
+ * One Gemini text generation with model fallback, retries and short timeouts (shared by AI drafts and the advisor).
+ * Returns text = null when Gemini is busy or down; throws SenderError on setup problems (bad key, quota).
+ */
+function geminiGenerate(ctx: HttpCtx, key: string, model: string | null, prompt: string, config: Record<string, unknown>, tag: string) {
     // Speed: no "thinking" (a form letter does not need it), a capped length, a short per-call timeout and an overall
     // budget, so a click answers in seconds. If a model rejects the thinking setting (HTTP 400), retry it once without.
     const body = (thinking: ThinkingConfig) =>
       JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 1200, ...(thinking ? { thinkingConfig: thinking } : {}) },
+        generationConfig: { ...config, ...(thinking ? { thinkingConfig: thinking } : {}) },
       });
-    type Res = { ok: boolean; status: number; json(): any };
+    type Res = GeminiRes;
     const call = (m: string, thinking: ThinkingConfig): Res => {
       try {
         return ctx.http.fetch(`${GEMINI_API}/models/${encodeURIComponent(m)}:generateContent`, {
@@ -860,7 +833,7 @@ export const draftNotice = db.procedure(
       usedModel = m;
       res = generate(m);
       calls++;
-      console.log(`draftNotice: ${m} -> HTTP ${res.status}`);
+      console.log(`${tag}: ${m} -> HTTP ${res.status}`);
       if (res.ok) {
         lastGoodModel = m;
         break;
@@ -875,10 +848,50 @@ export const draftNotice = db.procedure(
       throw new SenderError(`Gemini request failed (HTTP ${res.status}, model ${usedModel}). Check the API key and quota.`);
     const data = res?.ok ? (res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] }) : null;
     const aiText = data?.candidates?.[0]?.content?.parts?.map(p => p.text ?? '').join('').trim();
+    return { text: aiText || null, usedModel, tried: [...tried] };
+}
+
+export const draftNotice = db.procedure(
+  { incidentId: t.u64(), notice: t.string(), label: t.string(), people: t.u64(), rule: t.string(), due: t.string() },
+  t.string(),
+  (ctx, args) => {
+    const notice = clip(args.notice, 80), label = clip(args.label, 120), rule = clip(args.rule, 200), due = clip(args.due, 60);
+
+    // 1. Check access and gather facts in a read transaction.
+    const facts = ctx.withTx(tx => {
+      requireRole(tx, ...PRIVILEGED_ROLES); // the draft goes into privileged #legal
+      const inc = requireIncident(tx, args.incidentId);
+      const stolen = [...tx.db.scopeItem.incidentId.filter(args.incidentId)].filter(s => s.status === 'exfiltrated');
+      return {
+        title: inc.title,
+        kind: inc.kind,
+        detected: fmtDate(inc.detectedAt),
+        stolen: stolen.map(s => `${s.label} (${s.recordsCount.toLocaleString()} records)`).join('; ') || 'not yet confirmed',
+      };
+    });
+
+    const key = ctx.env.GEMINI_API_KEY;
+    if (!key) throw new SenderError('AI drafting is off: publish the module with GEMINI_API_KEY set (see README).');
+    const model = ctx.env.GEMINI_MODEL || null; // unset = pick the newest stable Flash this key can use
+
+    // 2. Ask Gemini (outside any transaction: HTTP is not allowed inside withTx).
+    const prompt = [
+      'You are drafting a data breach notification for a US bank. Write the full letter, ready for a lawyer to review.',
+      `Recipient: ${label}. Who must be told and when: ${rule}; deadline ${due}.`,
+      `People affected: ${args.people.toLocaleString()}.`,
+      `Incident: ${facts.title} (${facts.kind}), detected ${facts.detected}.`,
+      `Data stolen: ${facts.stolen}.`,
+      'Include what the law for this recipient requires: what happened and when, what personal information was involved,',
+      'what the bank is doing, what the reader can do (credit freeze, fraud alert, free credit reports, the major credit bureaus\' contact details),',
+      'and a contact phone number and address. Use [BRACKETS] for any fact you do not know; never invent one.',
+      'Plain language, no markdown, under 350 words. Put "DRAFT - PRIVILEGED & CONFIDENTIAL - NOT LEGAL ADVICE" on the first line.',
+    ].join('\n');
+
+    const { text: aiText, usedModel, tried } = geminiGenerate(ctx, key, model, prompt, { temperature: 0.3, maxOutputTokens: 1200 }, 'draftNotice');
     const draft = aiText || templateNotice({ label, rule, due, people: args.people, ...facts });
     const header = aiText
       ? `AI draft (${usedModel}) for ${label}, review before sending:`
-      : `Template draft for ${label} (Gemini unavailable: ${[...tried].join(', ') || 'no model'}), review and fill the [BRACKETS]:`;
+      : `Template draft for ${label} (Gemini unavailable: ${tried.join(', ') || 'no model'}), review and fill the [BRACKETS]:`;
 
     // 3. Post into #legal and mark the notice drafted, atomically.
     ctx.withTx(tx => {
@@ -895,6 +908,124 @@ export const draftNotice = db.procedure(
     return draft;
   }
 );
+
+
+// ---------- Incident advisor (Gemini, grounded): answers from the live record, proposes checked actions ----------
+const SCOPE_WORDS: Record<string, string> = {
+  encrypted: 'locked by ransomware', exfiltrated: 'stolen', accessed: 'seen by attacker', unknown: 'not checked yet', clear: 'safe',
+};
+const NOTICE_KEY = /^(?:[A-Z]{2}-(?:Customers|Attorney General|Credit bureaus)|clock-\d+)$/;
+type IncidentRow = NonNullable<ReturnType<Ctx['db']['incident']['id']['find']>>;
+
+/** Everything the advisor may know, as citable lines, filtered by the asker's role (no #legal for non-lawyers). */
+function advisorFacts(ctx: Ctx, inc: IncidentRow, role: string, noticesJson: string): AdvisorFacts {
+  const id = inc.id;
+  const nowMs = Number(ctx.timestamp.microsSinceUnixEpoch / 1000n);
+  const msOf = (ts: Timestamp) => Number(ts.microsSinceUnixEpoch / 1000n) - nowMs;
+  const ago = (ts: Timestamp) => {
+    const m = Math.max(0, Math.round(-msOf(ts) / 60_000));
+    return m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
+  };
+  const label = (p: string) => PHASE_LABELS[p] ?? p;
+  const next = nextPhase(inc.phase);
+  const lines = [
+    `[I] Incident "${clip(inc.title, 120)}"; severity ${inc.severity}; type ${inc.kind}; current phase ${label(inc.phase)}; detected ${ago(inc.detectedAt)}.`,
+    `[P] Playbook: phases in order ${PHASES.map(label).join(' > ')}. ` +
+      (next ? `When every ${label(inc.phase)} task is done, the incident moves to ${label(next)} after a 30-second countdown unless the lead stays. ` : 'This is the last phase. ') +
+      'Fraud transfers of $10,000 or more are frozen automatically. Marking data stolen starts the federal deadline clocks (bank regulator 36h, SEC 8-K if material).',
+  ];
+  const tasks = [...ctx.db.task.incidentId.filter(id)].map(t => ({ tag: `K${t.id}`, id: `${t.id}`, title: t.title, phase: t.phase, done: t.done }));
+  for (const t of tasks) lines.push(`[${t.tag}] Task (${label(t.phase)}, ${t.done ? 'done' : 'open'}): ${clip(t.title, 120)}`);
+  for (const e of [...ctx.db.timelineEvent.incidentId.filter(id)].sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 15).reverse())
+    lines.push(`[T${e.id}] Timeline, ${ago(e.at)}, ${e.kind}: ${clip(e.text, 160)}`);
+  for (const sc of ctx.db.scopeItem.incidentId.filter(id))
+    lines.push(`[S${sc.id}] What was hit: ${clip(sc.label, 80)} (${sc.assetType}) is ${SCOPE_WORDS[sc.status] ?? sc.status}, ${sc.recordsCount.toLocaleString()} records`);
+  const alerts = [...ctx.db.fraudAlert.incidentId.filter(id)].map(a => ({
+    tag: `F${a.id}`, id: `${a.id}`, status: a.status,
+    label: `$${(a.amountCents / 100n).toLocaleString()} from account ${clip(a.accountRef, 30)}`, reason: clip(a.reason, 80),
+  }));
+  for (const a of alerts) lines.push(`[${a.tag}] Fraud alert (${a.status}): ${a.label}, ${a.reason}`);
+  const clocks = [...ctx.db.legalClock.incidentId.filter(id)].map(c => ({ tag: `D${c.id}`, id: `${c.id}`, label: clip(c.label, 80), done: c.done, msLeft: msOf(c.deadlineAt) }));
+  for (const c of clocks) lines.push(`[${c.tag}] Deadline: ${c.label}, ${c.done ? 'filed' : `due ${left(c.msLeft)}`}`);
+  for (const st of ctx.db.stateImpact.incidentId.filter(id))
+    lines.push(`[A${st.id}] Stolen records by state: ${st.state} has ${st.records.toLocaleString()} affected residents`);
+
+  // Notices owed come from the client's notice list (state rules live there); status always comes from our tables.
+  const sent = new Map([...ctx.db.notifyStatus.incidentId.filter(id)].map(n => [n.notice, n.status]));
+  const clockDone = new Map(clocks.map(c => [`clock-${c.id}`, c.done]));
+  let parsed: unknown = [];
+  try {
+    parsed = JSON.parse(noticesJson.slice(0, 6000));
+  } catch {
+    parsed = [];
+  }
+  const notices: AdvisorFacts['notices'] = [];
+  for (const n of Array.isArray(parsed) ? parsed.slice(0, 30) : []) {
+    const key = clip(String((n as { key?: unknown })?.key ?? ''), 60);
+    if (!NOTICE_KEY.test(key) || notices.some(x => x.key === key)) continue;
+    const dueMs = Number((n as { dueMs?: unknown })?.dueMs);
+    const status = clockDone.get(key) ? 'sent' : (sent.get(key) ?? 'not_started');
+    const item = { tag: `Q${notices.length + 1}`, key, label: clip(String((n as { label?: unknown })?.label ?? key), 80), status, msLeft: Number.isFinite(dueMs) && dueMs > 0 ? dueMs - nowMs : null };
+    notices.push(item);
+    const people = Number((n as { people?: unknown })?.people) || 0;
+    lines.push(`[${item.tag}] Notice owed to ${item.label}: ${people.toLocaleString()} people, due ${left(item.msLeft)}, status ${status.replace('_', ' ')}`);
+  }
+
+  const privileged = PRIVILEGED_ROLES.includes(role);
+  const channels = new Map([...ctx.db.channel.incidentId.filter(id)].filter(c => privileged || !c.privileged).map(c => [c.id, c.name]));
+  const names = new Map([...ctx.db.user.iter()].map(u => [u.identity.toHexString(), u.name]));
+  const msgs = [...ctx.db.message.iter()].filter(m => channels.has(m.channelId)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 10).reverse();
+  for (const m of msgs)
+    lines.push(`[M${m.id}] Chat #${channels.get(m.channelId)}, ${names.get(m.sender.toHexString()) ?? 'Knight Agent'}: ${clip(m.text, 160)}`);
+
+  return { lines, phase: inc.phase, phases: PHASES, phaseLabels: PHASE_LABELS, tasks, alerts, clocks, notices };
+}
+
+export const askAdvisor = db.procedure(
+  { incidentId: t.u64(), question: t.string(), history: t.string(), notices: t.string() },
+  t.string(),
+  (ctx, args) => {
+    const question = clip(args.question, 500).trim();
+    if (!question) throw new SenderError('Ask a question first');
+    const facts = ctx.withTx(tx => {
+      const me = requireRole(tx);
+      return advisorFacts(tx, requireIncident(tx, args.incidentId), me.role, args.notices);
+    });
+    let key: string | undefined;
+    let model: string | null = null;
+    try {
+      key = ctx.env.GEMINI_API_KEY;
+      model = ctx.env.GEMINI_MODEL || null;
+    } catch {
+      key = undefined; // no environment (e.g. unit tests): answer from rules
+    }
+    if (!key) return JSON.stringify(ruleBasedReply(facts, 'AI is not configured on this server'));
+    const prompt = advisorPrompt(facts, question, args.history.slice(0, 2000));
+    let res: { text: string | null; usedModel: string };
+    try {
+      res = geminiGenerate(ctx, key, model, prompt, { temperature: 0.1, maxOutputTokens: 900, responseMimeType: 'application/json', responseSchema: ADVISOR_SCHEMA }, 'askAdvisor');
+    } catch {
+      return JSON.stringify(ruleBasedReply(facts, 'Gemini rejected the request'));
+    }
+    if (!res.text) return JSON.stringify(ruleBasedReply(facts, 'Gemini is busy'));
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(res.text);
+    } catch {
+      parsed = null;
+    }
+    return JSON.stringify(checkReply(parsed, facts, res.usedModel) ?? ruleBasedReply(facts, 'the AI answer was unusable'));
+  }
+);
+
+/** After a human confirms an advisor suggestion and it succeeds: keep "AI-suggested, human-confirmed" on the record. */
+export const logAdvisorAction = db.reducer({ incidentId: t.u64(), label: t.string() }, (ctx, { incidentId, label }) => {
+  const me = requireRole(ctx);
+  requireIncident(ctx, incidentId);
+  const text = clip(label, 200);
+  timeline(ctx, incidentId, 'action', `Advisor suggestion confirmed by ${me.name}: ${text}`);
+  audit(ctx, 'advisor_action', text);
+});
 
 // ---------- Attack drill: a scripted attack that plays out live ----------
 // Each step runs `waitSec` after the previous one. Events go through the same helpers
