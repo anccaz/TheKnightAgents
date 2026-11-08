@@ -7,3 +7,5 @@
 - Fraud rule (`lib.mjs` `isSuspicious`): $5,000+ at 2-4 AM (time read from the description/nickname, Nessie dates have no time), and for bills a payee the bank has not seen. $10,000+ auto-freezes in the module.
 - Tests: `node --test scripts/lib.test.mjs` (fake data is deterministic: same `--count` gives the same bank).
 - `seed-output.json` and `import-state.json` are local run data and are gitignored.
+- Use a clean incident (not a drill one): `spacetime call --server maincloud breach-room create_incident '"Nessie import test"' '"critical"' '"data_theft"'`. Start `--watch` before `--plant`, or the plant is caught by the first scan and doesn't look live.
+- To see Maincloud in the browser: `VITE_SPACETIME_URI=wss://maincloud.spacetimedb.com npm run dev` in `client/`, then get your browser's key added on Team.

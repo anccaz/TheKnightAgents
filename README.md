@@ -85,12 +85,26 @@ Rules live in `spacetimedb/src/index.ts`: `DRILL`, `LEGAL_RULES`, `AUTO_FREEZE_C
 Per-sponsor demo scripts: [docs/demo-script.md](docs/demo-script.md).
 
 ## Demo: real bank data from Nessie (Capital One)
-Instead of the scripted drill, an incident can be filled from Capital One's Nessie API. Put `NESSIE_API_KEY=...` in the root `.env` (never commit it). The `spacetime` CLI identity must be a member with role incident lead or responder: run `spacetime login show`, then add that ID on **Team**.
+Instead of the scripted drill, an incident can be filled from Capital One's Nessie API. Put `NESSIE_API_KEY=...` in the root `.env` (never commit it). The `spacetime` CLI identity must be a member: run `spacetime login show`, then add that ID on **Team** (incident lead or admin if it should also create incidents, responder is enough to import).
+
+**1. Seed the bank** (about 1 minute):
 ```bash
 node scripts/seed-nessie.mjs --reset          # "First Avon Bank": 260 fake customers in TX/CA/FL/NY/OK, 6 planted fraud items
+```
+**2. Get a clean incident.** The app always shows the newest incident, and the declare form only appears when there is none. Don't import into a drill incident (its fake numbers mix with Nessie's). Create one from the CLI and note the ID it gets (`INC-2026-0005` means ID 5):
+```bash
+spacetime call --server maincloud breach-room create_incident '"Nessie import test"' '"critical"' '"data_theft"'
+spacetime sql --server maincloud breach-room "SELECT id, title FROM incidents"
+```
+**3. Import:**
+```bash
 node scripts/import-nessie.mjs --incident <id> --server maincloud
 ```
-Use the incident ID shown in the app header. The importer fills **Who must we tell first** (customers per state), marks the customer records stolen (legal clocks start, including Texas AG), and raises 6 fraud alerts: the three $10,000+ withdrawals freeze themselves, the three new-payee bills wait under **Fraud: needs a decision**.
+The importer fills **Who must we tell first** (customers per state: TX 162, CA 40, FL 25, NY 22, OK 11), marks the 260 customer records stolen (legal clocks start: bank regulator, SEC 8-K, Texas AG, Texas customers), and raises 6 fraud alerts: the three $10,000+ withdrawals freeze themselves, the three new-payee bills wait under **Fraud: needs a decision**.
+
+**4. Look at it in the browser.** `client/.env` usually points at a local server; to see Maincloud without editing it, start the client with `VITE_SPACETIME_URI=wss://maincloud.spacetimedb.com npm run dev`. Your browser has a different key on each server, so on Maincloud it may show the access gateway first: copy the raw key and have an admin add it (or `spacetime call --server maincloud breach-room add_member '"0x<key>"' '"<name>"' '"<email>"' '"admin"'`).
+
+Note: the Texas AG *clock* starts on 250+ stolen records in total, but the chart only draws a **TX AG** bubble at 250+ *Texans*. With 162 Texans, Texas AG shows as a deadline, not a bubble.
 
 **Live moment:** keep the importer watching, then plant a new fraud withdrawal from a second terminal. A new frozen alert appears on every screen within about 10 seconds.
 ```bash
@@ -127,7 +141,7 @@ docs/                     plan.md, agent-prompts.md, demo-script.md
 |---|---|---|---|
 | A | Annie | Access control, roles, audit log, views, Maincloud | `addMember` `setRole` |
 | B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `sendMessage` `setNotifyStatus` `startDrill` `stopDrill` |
-| C | _name_ | Nessie seed and importer, scope, fraud watch | `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` `setStateImpact` |
+| C | Navya | Nessie seed and importer, scope, fraud watch | `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` `setStateImpact` |
 | D | _name_ | Legal rules, Gemini drafts, Devpost, pitch | `startLegalClock` `completeLegalClock` |
 
 ## Checklist
@@ -162,7 +176,8 @@ Tick boxes as you go (edit this file, commit, push). Deadlines: **initial Devpos
 - [x] Fix `scripts/seed-nessie.mjs` against the verified Nessie endpoints (unit tested; confirm on the first real `--reset` run)
 - [x] `scripts/import-nessie.mjs`: customers by state into `set_state_impact`, compromised accounts into `upsert_scope_item`, suspicious withdrawals/bills into `raise_fraud_alert`
 - [x] Document how to run the importer here (see **Demo: real bank data from Nessie**)
-- [ ] Done-when check on Maincloud: 5 state bubbles, 6 fraud alerts (3 frozen), Texas AG clock, `--watch` + `--plant` adds an alert
+- [x] Done-when check on Maincloud (incident 5): 5 states on the chart, 6 fraud alerts (3 frozen), Texas AG clock, `--watch` + `--plant` added a live frozen alert
+- [ ] Decide with Lane D: should the TX AG clock count Texans only (matches the chart) instead of all stolen records?
 
 ### Lane D: legal + AI + submission
 - [ ] **Initial Devpost by 11 PM**: title, one-liner, select Winstead, Spacetime, Capital One plus MLH Gemini, GoDaddy
