@@ -55,12 +55,6 @@ const US_NAMES: Record<string, string> = {
   WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
 };
 
-// Full state name (as in the map data) -> 2-letter code.
-export const CODE_BY_NAME: Record<string, string> = Object.fromEntries([
-  ...Object.entries(US_NAMES).map(([code, name]) => [name, code]),
-  ...Object.entries(RULES).map(([code, r]) => [r.name, code]),
-]);
-
 export function countdown(due: Date | null, now: number) {
   if (!due) return 'ASAP';
   const ms = due.getTime() - now;

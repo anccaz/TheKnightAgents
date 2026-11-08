@@ -5,7 +5,7 @@ import { Lock, Send, Hash, CheckCircle2, AlertTriangle, Clock, Plus, ChevronDown
 import { reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import { NoIncident, PHASE_LABEL, PRIVILEGED, SCOPE_LABEL, WRITERS, can, useCurrentIncident, useMe } from '@/components/shared';
-import NotificationMap from '@/components/NotificationMap';
+import NotifyPriorityChart from '@/components/NotifyPriorityChart';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -143,7 +143,7 @@ export default function FeedPage() {
 
   return (
     <section className="flex flex-col gap-4">
-      <NotificationMap incidentId={incident.id} />
+      <NotifyPriorityChart incidentId={incident.id} />
 
       {/* Deadlines */}
       <div className="glass p-3">

@@ -36,7 +36,7 @@ Stack and layout:
   read src/components/ui/* props before using). Import with "@/". Icons: lucide-react.
   3 pages only: src/pages/incident (record, phases, tasks, what was hit, fraud), src/pages/feed (notification map,
   deadlines, merged chat/timeline/security feed), src/pages/team (join by ID, add member, roles, security events).
-  Shell: src/App.tsx. Map: src/components/NotificationMap.tsx (us-atlas shapes, neon SVG). State rules:
+  Shell: src/App.tsx. Notice priority chart: src/components/NotifyPriorityChart.tsx (bubble chart: x = time left, y = people affected, color = customers vs authorities). State rules:
   src/lib/notifyRules.ts. Background: React Bits GradientASCII (src/components/GradientASCII.jsx) - do not
   re-add loseContext() in its cleanup (breaks under React StrictMode: white screen).
 - scripts/ = Nessie seed + fraud rule (node --test scripts/*.test.mjs).
@@ -107,7 +107,7 @@ Out of scope: changing to 3 roles (team decided to skip), UI redesign.
 ```text
 You own Lane B: the Incident page, the Live Feed page, the notification map UI, and the demo.
 Files: client/src/pages/incident/IncidentPage.tsx, client/src/pages/feed/FeedPage.tsx,
-client/src/components/NotificationMap.tsx, README demo section, docs/demo-script.md (new).
+client/src/components/NotifyPriorityChart.tsx, README demo section, docs/demo-script.md (new).
 You may add the backend pieces for task 1 (coordinate with Lane A: tell them which table you added).
 
 Tasks, in order:
@@ -117,7 +117,7 @@ Tasks, in order:
      view notifyStatuses, audit() on 'sent', timeline 'action' entry; test it.
    - Rules: add credit-bureau obligation when a state has >= 1000 residents affected (Lane D confirms the threshold
      per state in client/src/lib/notifyRules.ts).
-   - UI in NotificationMap obligations list: each obligation shows status chip + buttons "Mark drafted" / "Mark sent"
+   - UI in NotifyPriorityChart's notice queue (right-hand list): each obligation shows status chip + buttons "Mark drafted" / "Mark sent"
      (confirm once), sent ones show who/when. Header shows "N of M notices sent".
    - Show "What was stolen" per incident (e.g. "Names + account numbers") from the scope items labels/types.
 2. Auto status update to #exec: in the module's setPhase (and when a drill step marks data stolen), post a message
@@ -127,7 +127,7 @@ Tasks, in order:
    Maincloud vs local setup.
 4. docs/demo-script.md: a 3-minute script per sponsor (Winstead: security + ease of use + legal map;
    Spacetime: "no server, every rule is a reducer, every screen is a live subscription, the drill is a scheduled
-   reducer"; Capital One: Nessie customers light the map, Nessie withdrawals/bills trigger fraud + auto-freeze).
+   reducer"; Capital One: Nessie customers fill the notice chart, Nessie withdrawals/bills trigger fraud + auto-freeze).
    Then record a backup screen video of the drill on Maincloud.
 Keep the UI rules (3 colors, no glows except map, no emojis, Oxanium titles).
 ```
