@@ -66,7 +66,7 @@ export default function NotificationMap({ incidentId }: { incidentId: bigint }) 
   return (
     <section aria-label="Notification map">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-heading text-sm tracking-[0.3em] text-white uppercase neon-text">Who must we tell</h2>
+        <h2 className="font-heading text-sm tracking-[0.3em] text-white uppercase">Who must we tell</h2>
         <span className="text-sm text-muted-foreground">
           {total ? (
             <>
@@ -153,7 +153,7 @@ export default function NotificationMap({ incidentId }: { incidentId: bigint }) 
                   {stateName(i.state)} <span className="text-muted-foreground">· {i.records.toLocaleString()}</span>
                 </span>
                 <Badge variant="outline" className={cn('font-mono', i.next && i.next.getTime() - now < 7 * 86_400_000 ? 'border-sev-high text-sev-high' : 'border-neon/60 text-neon')}>
-                  ⏱ {countdown(i.next, now)}
+                  {countdown(i.next, now)}
                 </Badge>
               </div>
               {selected?.state === i.state && (

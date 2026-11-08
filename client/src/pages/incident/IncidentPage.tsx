@@ -20,11 +20,11 @@ const ASSET_TYPES: Record<string, string> = { system: 'System', customer: 'Custo
 
 // Icon + color per status so it reads without color too.
 const SCOPE_STYLE: Record<string, { Icon: LucideIcon; cls: string }> = {
-  encrypted: { Icon: Lock, cls: 'text-sev-critical border-sev-critical/60 shadow-[0_0_18px_rgb(255_45_111/0.35)]' },
-  exfiltrated: { Icon: Download, cls: 'text-magenta border-magenta/60 shadow-[0_0_18px_rgb(202_1_83/0.35)]' },
-  accessed: { Icon: Eye, cls: 'text-sev-high border-sev-high/60 shadow-[0_0_18px_rgb(255_138_61/0.3)]' },
-  unknown: { Icon: CircleHelp, cls: 'text-sev-medium border-sev-medium/60 shadow-[0_0_18px_rgb(245_208_0/0.25)]' },
-  clear: { Icon: ShieldCheck, cls: 'text-ok border-ok/60 shadow-[0_0_18px_rgb(52_224_161/0.3)]' },
+  encrypted: { Icon: Lock, cls: 'text-sev-critical border-sev-critical/60' },
+  exfiltrated: { Icon: Download, cls: 'text-magenta border-magenta/60' },
+  accessed: { Icon: Eye, cls: 'text-sev-high border-sev-high/60' },
+  unknown: { Icon: CircleHelp, cls: 'text-sev-medium border-sev-medium/60' },
+  clear: { Icon: ShieldCheck, cls: 'text-ok border-ok/60' },
 };
 
 const money = (cents: bigint) => `$${(cents / 100n).toLocaleString()}.${(cents % 100n).toString().padStart(2, '0')}`;
@@ -37,8 +37,8 @@ export default function IncidentPage() {
       <section className="glass flex flex-col gap-4 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-mono text-xs tracking-[0.3em] text-magenta uppercase magenta-text">Active incident</p>
-            <h1 className="text-2xl font-bold break-words text-white neon-text sm:text-3xl">{incident.title}</h1>
+            <p className="font-mono text-xs tracking-[0.3em] text-magenta uppercase">Active incident</p>
+            <h1 className="text-2xl font-bold break-words text-white sm:text-3xl">{incident.title}</h1>
           </div>
           <DrillControls />
         </div>
@@ -57,7 +57,7 @@ export default function IncidentPage() {
 function Panel({ title, children, className }: { title: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={cn('glass flex flex-col gap-4 p-5', className)}>
-      <h2 className="font-heading text-sm font-bold tracking-[0.2em] text-white uppercase neon-text">{title}</h2>
+      <h2 className="font-heading text-sm font-bold tracking-[0.2em] text-white uppercase">{title}</h2>
       {children}
     </section>
   );
@@ -96,7 +96,7 @@ function DeclareForm() {
   };
   return (
     <form className="glass mx-auto flex max-w-xl flex-col gap-4 p-6" onSubmit={submit}>
-      <h1 className="text-2xl font-bold text-white neon-text">No incident yet</h1>
+      <h1 className="text-2xl font-bold text-white">No incident yet</h1>
       <p className="text-muted-foreground">Something wrong? Declare an incident so the whole team sees it.</p>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="inc-title">What is happening?</Label>
@@ -112,7 +112,7 @@ function DeclareForm() {
           <Pick id="inc-kind" label="Type" value={kind} items={KIND_LABEL} onChange={setKind} />
         </div>
       </div>
-      <Button type="submit" size="lg" className="h-12 text-base font-bold shadow-[0_0_24px_rgb(56_188_246/0.5)]">Declare incident</Button>
+      <Button type="submit" size="lg" className="h-12 text-base font-bold">Declare incident</Button>
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">Practising? <DrillControls /></div>
     </form>
   );
@@ -140,10 +140,10 @@ function PhaseStepper({ incidentId, phase }: { incidentId: bigint; phase: string
               disabled={!lead || i === idx}
               aria-current={i === idx ? 'step' : undefined}
               className={cn(
-                'flex w-full items-center gap-2 rounded-lg border-t-4 bg-muted/40 px-3 py-2 text-left font-mono text-xs tracking-wider uppercase outline-none focus-visible:ring-3 focus-visible:ring-ring/60 disabled:cursor-default',
-                i < idx && 'border-ok text-ok enabled:hover:bg-muted',
-                i === idx && 'border-neon bg-neon/15 font-bold text-neon shadow-[0_0_20px_rgb(56_188_246/0.45)] neon-text',
-                i > idx && 'border-border text-muted-foreground enabled:hover:bg-muted'
+                'flex w-full items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-left font-mono text-xs tracking-wider uppercase outline-none focus-visible:ring-3 focus-visible:ring-ring/60 disabled:cursor-default',
+                i < idx && 'text-foreground enabled:hover:bg-muted',
+                i === idx && 'border-primary bg-primary font-bold text-primary-foreground',
+                i > idx && 'text-muted-foreground enabled:hover:bg-muted'
               )}
             >
               <span aria-hidden="true">{i < idx ? '✓' : i === idx ? '▶' : i + 1}</span>
@@ -154,11 +154,11 @@ function PhaseStepper({ incidentId, phase }: { incidentId: bigint; phase: string
         ))}
       </ol>
       {next && lead && (
-        <Button size="lg" onClick={() => go(next, idx + 1)} className="h-auto min-h-12 self-start px-5 py-2 text-base font-bold whitespace-normal shadow-[0_0_24px_rgb(56_188_246/0.5)]">
+        <Button size="lg" onClick={() => go(next, idx + 1)} className="h-auto min-h-12 self-start px-5 py-2 text-base font-bold whitespace-normal">
           Done with {PHASE_LABEL[phase]}: move to {PHASE_LABEL[next]} →
         </Button>
       )}
-      {!next && <p className="font-bold text-ok">✓ All phases done.</p>}
+      {!next && <p className="font-bold text-foreground">All phases done.</p>}
       {!lead && <p className="text-sm text-muted-foreground">Only the incident lead moves phases.</p>}
     </div>
   );
@@ -206,7 +206,7 @@ function IncidentRecord({ incident }: { incident: Incident }) {
         {rows.map(e => (
           <li key={e.id.toString()}>
             <time className="mr-2 font-mono text-xs text-muted-foreground">{e.at.toDate().toLocaleTimeString()}</time>
-            {e.kind === 'auto' && <span className="mr-1 text-neon">⚡ Auto:</span>}
+            {e.kind === 'auto' && <span className="mr-1 text-neon">Auto:</span>}
             {e.text}
           </li>
         ))}

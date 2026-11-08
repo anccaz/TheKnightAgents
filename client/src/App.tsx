@@ -64,10 +64,10 @@ export default function App() {
     <div className="min-h-screen text-foreground">
       <Background />
       <div className="relative z-10">
-      <header className="sticky top-0 z-20 border-b border-border bg-background/35 backdrop-blur-sm">
+      <header className="sticky top-0 z-20 border-b border-border bg-card">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <span className="font-heading text-xl font-bold tracking-[0.25em] text-white neon-text">
-            BREACH<span className="text-magenta magenta-text">//</span>ROOM
+          <span className="font-heading text-xl font-bold tracking-[0.25em] text-white">
+            BREACH<span className="text-magenta">//</span>ROOM
           </span>
           {incident ? (
             <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -103,7 +103,7 @@ export default function App() {
                   aria-current={k === current ? 'page' : undefined}
                   className={cn(
                     'flex items-center gap-2 border-b-2 px-4 py-2 font-mono text-sm tracking-wider uppercase transition-colors',
-                    k === current ? 'border-neon text-neon neon-text' : 'border-transparent text-muted-foreground hover:text-foreground'
+                    k === current ? 'border-neon text-neon' : 'border-transparent text-muted-foreground hover:text-foreground'
                   )}
                 >
                   <Icon className="size-4" /> {label}

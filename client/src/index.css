@@ -16,11 +16,12 @@
     --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
     --color-neon: var(--neon);
     --color-magenta: var(--magenta);
-    --color-sev-critical: #ff2d6f;
-    --color-sev-high: #ff8a3d;
-    --color-sev-medium: #f5d000;
-    --color-sev-low: #82a6e0;
-    --color-ok: #34e0a1;
+    /* 3-color system: cyan (primary), magenta (danger), neutral (white/gray) */
+    --color-sev-critical: var(--magenta);
+    --color-sev-high: var(--magenta);
+    --color-sev-medium: var(--foreground);
+    --color-sev-low: var(--muted-foreground);
+    --color-ok: var(--neon);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -100,24 +101,24 @@
     /* Cyberpunk palette: #1e3fd8 #82a6e0 #38bcf6 #ca0153 #580534 */
     --background: #04050d;
     --foreground: #ffffff;
-    --card: rgb(8 12 32 / 0.42);
+    --card: #0b0f22;
     --card-foreground: #ffffff;
-    --popover: #0a0f26;
+    --popover: #0b0f22;
     --popover-foreground: #e6ecff;
     --primary: #38bcf6;
     --primary-foreground: #03111c;
-    --secondary: rgb(30 63 216 / 0.35);
-    --secondary-foreground: #dfe7ff;
-    --muted: rgb(130 166 224 / 0.12);
+    --secondary: rgb(255 255 255 / 0.08);
+    --secondary-foreground: #ffffff;
+    --muted: rgb(255 255 255 / 0.06);
     --muted-foreground: #8ea3c9;
-    --accent: rgb(202 1 83 / 0.25);
-    --accent-foreground: #ffd6e6;
+    --accent: rgb(255 45 111 / 0.14);
+    --accent-foreground: #ffffff;
     --destructive: #ff2d6f;
-    --border: rgb(56 188 246 / 0.22);
-    --input: rgb(56 188 246 / 0.28);
+    --border: rgb(255 255 255 / 0.12);
+    --input: rgb(255 255 255 / 0.16);
     --ring: #38bcf6;
     --neon: #38bcf6;
-    --magenta: #ca0153;
+    --magenta: #ff2d6f;
     --chart-1: #38bcf6;
     --chart-2: #1e3fd8;
     --chart-3: #82a6e0;
@@ -149,9 +150,7 @@
     background-color: #04050d;
     }
 }
-/* Neon glass panels and glow text */
+/* Solid panels (no glass, no glow) */
 @layer components {
-  .glass { @apply bg-card backdrop-blur-[3px] border border-border rounded-xl shadow-[0_0_0_1px_rgb(56_188_246/0.06),0_8px_40px_-12px_rgb(30_63_216/0.45)]; }
-  .neon-text { text-shadow: 0 0 12px rgb(56 188 246 / 0.6); }
-  .magenta-text { text-shadow: 0 0 12px rgb(202 1 83 / 0.7); }
+  .glass { @apply bg-card border border-border rounded-xl; }
 }

@@ -28,7 +28,7 @@ const KIND_LABEL: Record<string, string> = {
   scope_change: 'What was hit',
   action: 'Action',
   ioc: 'Clue',
-  auto: '⚡ Auto',
+  auto: 'Auto',
   security: 'Security',
 };
 
@@ -148,7 +148,7 @@ export default function FeedPage() {
       {/* Deadlines */}
       <div className="glass p-3">
         <div className="mb-2 flex items-center gap-2">
-          <h2 className="neon-text font-heading text-sm font-bold tracking-widest text-white uppercase">Deadlines</h2>
+          <h2 className=" font-heading text-sm font-bold tracking-widest text-white uppercase">Deadlines</h2>
           <Button size="xs" variant="outline" className="ml-auto" aria-expanded={showForm} onClick={() => setShowForm(s => !s)}>
             {showForm ? <ChevronDown /> : <Plus />} Add a deadline
           </Button>
@@ -160,9 +160,9 @@ export default function FeedPage() {
             const state = c.done ? 'done' : left <= 0 ? 'overdue' : left < 24 * 3600_000 ? 'soon' : 'ok';
             const tone = {
               done: 'border-ok/60 text-ok',
-              overdue: 'border-sev-critical text-sev-critical shadow-[0_0_16px_rgb(255_45_111/0.45)]',
-              soon: 'border-sev-high text-sev-high shadow-[0_0_14px_rgb(255_138_61/0.35)]',
-              ok: 'border-neon/50 text-neon shadow-[0_0_12px_rgb(56_188_246/0.25)]',
+              overdue: 'border-sev-critical text-sev-critical',
+              soon: 'border-sev-high text-sev-high',
+              ok: 'border-neon/50 text-neon',
             }[state];
             const Icon = state === 'done' ? CheckCircle2 : state === 'ok' ? Clock : AlertTriangle;
             return (
@@ -235,14 +235,14 @@ export default function FeedPage() {
             <TabsList>
               <TabsTrigger value="all">All</TabsTrigger>
               <TabsTrigger value="chat">Chat</TabsTrigger>
-              <TabsTrigger value="auto">⚡ Auto</TabsTrigger>
+              <TabsTrigger value="auto">Auto</TabsTrigger>
               {isAdmin && <TabsTrigger value="security">Security</TabsTrigger>}
             </TabsList>
           </Tabs>
         </div>
 
         {channel?.privileged && (
-          <div role="note" className="magenta-text flex items-center gap-2 rounded-lg border border-magenta/60 bg-magenta/10 px-3 py-2 text-sm font-semibold text-magenta">
+          <div role="note" className=" flex items-center gap-2 rounded-lg border border-magenta/60 bg-magenta/10 px-3 py-2 text-sm font-semibold text-magenta">
             <Lock className="size-4" aria-hidden /> Privileged & Confidential — attorney-client. Do not forward.
           </div>
         )}
@@ -254,8 +254,8 @@ export default function FeedPage() {
               key={it.key}
               className={cn(
                 'rounded-md border-l-2 border-border bg-background/30 px-3 py-1.5 text-sm',
-                it.kind === 'auto' && 'border-neon shadow-[-4px_0_12px_-2px_rgb(56_188_246/0.6)]',
-                it.kind === 'security' && 'border-magenta shadow-[-4px_0_12px_-2px_rgb(202_1_83/0.6)]'
+                it.kind === 'auto' && 'border-neon',
+                it.kind === 'security' && 'border-magenta'
               )}
             >
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

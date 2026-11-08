@@ -55,10 +55,10 @@ export function useCurrentIncident() {
 }
 
 const SEV_CLASS: Record<string, string> = {
-  critical: 'border-sev-critical text-sev-critical shadow-[0_0_14px_rgb(255_45_111/0.45)]',
-  high: 'border-sev-high text-sev-high',
-  medium: 'border-sev-medium text-sev-medium',
-  low: 'border-sev-low text-sev-low',
+  critical: 'border-magenta bg-magenta text-white',
+  high: 'border-magenta text-magenta',
+  medium: 'border-foreground/60 text-foreground',
+  low: 'border-border text-muted-foreground',
 };
 
 /** Severity as text + icon + color, so it reads without color too. */
