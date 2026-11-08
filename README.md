@@ -84,6 +84,21 @@ Rules live in `spacetimedb/src/index.ts`: `DRILL`, `LEGAL_RULES`, `AUTO_FREEZE_C
 
 Per-sponsor demo scripts: [docs/demo-script.md](docs/demo-script.md).
 
+## Demo: real bank data from Nessie (Capital One)
+Instead of the scripted drill, an incident can be filled from Capital One's Nessie API. Put `NESSIE_API_KEY=...` in the root `.env` (never commit it). The `spacetime` CLI identity must be a member with role incident lead or responder: run `spacetime login show`, then add that ID on **Team**.
+```bash
+node scripts/seed-nessie.mjs --reset          # "First Avon Bank": 260 fake customers in TX/CA/FL/NY/OK, 6 planted fraud items
+node scripts/import-nessie.mjs --incident <id> --server maincloud
+```
+Use the incident ID shown in the app header. The importer fills **Who must we tell first** (customers per state), marks the customer records stolen (legal clocks start, including Texas AG), and raises 6 fraud alerts: the three $10,000+ withdrawals freeze themselves, the three new-payee bills wait under **Fraud: needs a decision**.
+
+**Live moment:** keep the importer watching, then plant a new fraud withdrawal from a second terminal. A new frozen alert appears on every screen within about 10 seconds.
+```bash
+node scripts/import-nessie.mjs --incident <id> --server maincloud --watch   # terminal 1
+node scripts/seed-nessie.mjs --plant                                         # terminal 2, run it again for another one
+```
+Reruns never duplicate alerts (progress is in `scripts/import-state.json`, per server and incident). After wiping a local database, add `--fresh`. Preview without network: `node scripts/seed-nessie.mjs --dry-run`. Tests: `node --test scripts/lib.test.mjs`.
+
 ## Architecture
 There is no app server. The browser talks to SpacetimeDB directly over a websocket.
 - **Reducers** are the only way to write. Each one checks the caller's role first, then calls shared helpers that apply the auto-rules (clocks, freeze, guided tasks, #exec updates) inside the same transaction.
@@ -144,9 +159,10 @@ Tick boxes as you go (edit this file, commit, push). Deadlines: **initial Devpos
 - [ ] Record the backup drill video on Maincloud (two browsers side by side)
 
 ### Lane C: Nessie + scope + fraud
-- [ ] Fix `scripts/seed-nessie.mjs` against the verified Nessie endpoints
-- [ ] `scripts/import-nessie.mjs`: customers by state into `set_state_impact`, compromised accounts into `upsert_scope_item`, suspicious withdrawals/bills into `raise_fraud_alert`
-- [ ] Document how to run the importer here
+- [x] Fix `scripts/seed-nessie.mjs` against the verified Nessie endpoints (unit tested; confirm on the first real `--reset` run)
+- [x] `scripts/import-nessie.mjs`: customers by state into `set_state_impact`, compromised accounts into `upsert_scope_item`, suspicious withdrawals/bills into `raise_fraud_alert`
+- [x] Document how to run the importer here (see **Demo: real bank data from Nessie**)
+- [ ] Done-when check on Maincloud: 5 state bubbles, 6 fraud alerts (3 frozen), Texas AG clock, `--watch` + `--plant` adds an alert
 
 ### Lane D: legal + AI + submission
 - [ ] **Initial Devpost by 11 PM**: title, one-liner, select Winstead, Spacetime, Capital One plus MLH Gemini, GoDaddy

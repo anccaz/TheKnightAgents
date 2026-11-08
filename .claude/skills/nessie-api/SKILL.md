@@ -18,7 +18,7 @@ Verified from https://nessieisreal.com/docs.
 - Purchases: only `GET/PUT/DELETE /purchase/{id}` are documented. Don't rely on them; use withdrawals + bills.
 - No reset endpoint and no customer delete. Reset = delete each account's bills and then the account, one by one (customers stay).
 - Dates have no time of day: put "HH:MM AM" in the withdrawal `description` or bill `nickname`; the fraud rule reads it from there.
-- Bills can be cancelled (`PUT` status) - a real "freeze" action. Breach Room's freeze is simulated in SpacetimeDB.
+- Bills can be cancelled (`PUT` status) - a real "freeze" action. Knight Agent's freeze is simulated in SpacetimeDB.
 - "None found" lists come back as 404; treat as empty.
 - Amounts are dollars (numbers). Convert to cents (`toCents`) before calling reducers.
 
