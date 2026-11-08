@@ -144,6 +144,19 @@ const auditLog = table(
   }
 );
 
+// Stolen customers counted by US state: drives the notification map.
+// Filled by the Nessie importer (Lane C) from customer addresses, or by the drill.
+const stateImpact = table(
+  {},
+  {
+    id: t.u64().primaryKey().autoInc(),
+    incidentId: t.u64().index(),
+    state: t.string(), // 2-letter code
+    records: t.u64(),
+    since: t.timestamp(), // when these records were first known stolen; deadlines count from here
+  }
+);
+
 // Pending steps of a running attack drill; each row fires runDrillStep at its time.
 const drillStep = table(
   {},
@@ -158,6 +171,7 @@ const drillStep = table(
 const db = schema({
   owner,
   drillStep,
+  stateImpact,
   user,
   incident,
   timelineEvent,
@@ -459,6 +473,23 @@ export const completeLegalClock = db.reducer({ clockId: t.u64() }, (ctx, { clock
   audit(ctx, 'complete_legal_clock', c.label);
 });
 
+function setStateRecords(ctx: Ctx, incidentId: bigint, state: string, records: bigint) {
+  const code = state.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) throw new SenderError(`Invalid state: ${state}`);
+  const existing = [...ctx.db.stateImpact.incidentId.filter(incidentId)].find(r => r.state === code);
+  if (existing) ctx.db.stateImpact.id.update({ ...existing, records });
+  else ctx.db.stateImpact.insert({ id: 0n, incidentId, state: code, records, since: ctx.timestamp });
+}
+
+export const setStateImpact = db.reducer(
+  { incidentId: t.u64(), state: t.string(), records: t.u64() },
+  (ctx, { incidentId, state, records }) => {
+    requireRole(ctx, ...WRITERS);
+    requireIncident(ctx, incidentId);
+    setStateRecords(ctx, incidentId, state, records);
+  }
+);
+
 // ---------- Attack drill: a scripted attack that plays out live ----------
 // Each step runs `waitSec` after the previous one. Events go through the same helpers
 // as human actions, so the auto-rules (legal clocks, auto-freeze) fire on their own.
@@ -472,7 +503,15 @@ const DRILL: { waitSec: number; run: (ctx: Ctx, id: bigint) => void }[] = [
   { waitSec: 8, run: (ctx, id) => setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 'core-db-01', label: 'Core banking database', status: 'encrypted', recordsCount: 48_210n }) },
   { waitSec: 8, run: (ctx, id) => say(ctx, id, 'general', 'Ransom note on core-db-01: 40 BTC within 72 hours or the customer data gets published.') },
   { waitSec: 10, run: (ctx, id) => timeline(ctx, id, 'ioc', 'Outbound transfer of 3.1 GB from core-db-01 to 185.220.101.4 at 01:52') },
-  { waitSec: 8, run: (ctx, id) => setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 's3://avon-exports', label: 'Customer PII export', status: 'exfiltrated', recordsCount: 12_500n }) },
+  {
+    waitSec: 8,
+    run: (ctx, id) => {
+      // Who lives where, as the Nessie importer would report it from customer addresses.
+      for (const [st, n] of [['TX', 8_140n], ['CA', 2_960n], ['FL', 880n], ['NY', 410n], ['OK', 110n]] as const)
+        setStateRecords(ctx, id, st, n);
+      setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 's3://avon-exports', label: 'Customer PII export', status: 'exfiltrated', recordsCount: 12_500n });
+    },
+  },
   { waitSec: 10, run: (ctx, id) => raiseAlert(ctx, { incidentId: id, accountRef: 'CHK-4471', transferRef: 'TX-90211', amountCents: 240_000n, reason: 'New payee, 02:41 AM' }) },
   { waitSec: 7, run: (ctx, id) => raiseAlert(ctx, { incidentId: id, accountRef: 'SAV-1093', transferRef: 'TX-90218', amountCents: 1_875_000n, reason: 'New payee, 02:44 AM, compromised account' }) },
   { waitSec: 7, run: (ctx, id) => raiseAlert(ctx, { incidentId: id, accountRef: 'CHK-2286', transferRef: 'TX-90230', amountCents: 2_400_000n, reason: 'Wire to new payee, 02:47 AM' }) },
@@ -541,6 +580,9 @@ export const legalClocks = db.view({ name: 'legalClocks', public: true }, t.arra
 );
 export const fraudAlerts = db.view({ name: 'fraudAlerts', public: true }, t.array(fraudAlert.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.fraudAlert.iter()] : []
+);
+export const stateImpacts = db.view({ name: 'stateImpacts', public: true }, t.array(stateImpact.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.stateImpact.iter()] : []
 );
 export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
   roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []

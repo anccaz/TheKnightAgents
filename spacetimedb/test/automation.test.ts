@@ -60,3 +60,11 @@ test('drill creates an incident and schedules steps; clients cannot fire steps t
   h.withReducerTx(as('admin'), ctx => mod.stopDrill(ctx, {}));
   expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.drillStep.iter()])).toHaveLength(0);
 });
+
+test('state impact upserts per state and rejects bad codes', () => {
+  const h = setup();
+  h.withReducerTx(as('admin'), ctx => mod.setStateImpact(ctx, { incidentId: 1n, state: 'tx', records: 10n }));
+  h.withReducerTx(as('admin'), ctx => mod.setStateImpact(ctx, { incidentId: 1n, state: 'TX', records: 300n }));
+  expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.stateImpact.iter()].map(r => [r.state, r.records]))).toEqual([['TX', 300n]]);
+  expect(() => h.withReducerTx(as('admin'), ctx => mod.setStateImpact(ctx, { incidentId: 1n, state: 'Texas', records: 1n }))).toThrow(/Invalid state/);
+});

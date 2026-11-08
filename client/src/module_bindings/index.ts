@@ -44,6 +44,7 @@ import SendMessageReducer from "./send_message_reducer";
 import SetFraudAlertStatusReducer from "./set_fraud_alert_status_reducer";
 import SetPhaseReducer from "./set_phase_reducer";
 import SetRoleReducer from "./set_role_reducer";
+import SetStateImpactReducer from "./set_state_impact_reducer";
 import StartDrillReducer from "./start_drill_reducer";
 import StartLegalClockReducer from "./start_legal_clock_reducer";
 import StopDrillReducer from "./stop_drill_reducer";
@@ -61,6 +62,7 @@ import LegalClocksRow from "./legal_clocks_table";
 import MembersRow from "./members_table";
 import MessagesRow from "./messages_table";
 import ScopeItemsRow from "./scope_items_table";
+import StateImpactsRow from "./state_impacts_table";
 import TasksRow from "./tasks_table";
 import TimelineEventsRow from "./timeline_events_table";
 
@@ -124,6 +126,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, ScopeItemsRow),
+  stateImpacts: __table({
+    name: 'stateImpacts',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, StateImpactsRow),
   tasks: __table({
     name: 'tasks',
     indexes: [
@@ -152,6 +161,7 @@ const reducersSchema = __reducers(
   __reducerSchema("set_fraud_alert_status", SetFraudAlertStatusReducer),
   __reducerSchema("set_phase", SetPhaseReducer),
   __reducerSchema("set_role", SetRoleReducer),
+  __reducerSchema("set_state_impact", SetStateImpactReducer),
   __reducerSchema("start_drill", StartDrillReducer),
   __reducerSchema("start_legal_clock", StartLegalClockReducer),
   __reducerSchema("stop_drill", StopDrillReducer),

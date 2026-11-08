@@ -54,16 +54,24 @@ export function useCurrentIncident() {
   );
 }
 
-/** Text + color, so status is readable without color. */
-export function Chip({ kind, value, label }: { kind: string; value: string; label?: string }) {
-  return <span className={`chip ${kind}-${value}`}>{label ?? value}</span>;
-}
+const SEV_CLASS: Record<string, string> = {
+  critical: 'border-sev-critical text-sev-critical shadow-[0_0_14px_rgb(255_45_111/0.45)]',
+  high: 'border-sev-high text-sev-high',
+  medium: 'border-sev-medium text-sev-medium',
+  low: 'border-sev-low text-sev-low',
+};
 
+/** Severity as text + icon + color, so it reads without color too. */
 export function SeverityChip({ severity }: { severity: string }) {
-  const icon = severity === 'critical' ? '!!' : severity === 'high' ? '!' : '';
-  return <Chip kind="sev" value={severity} label={`${icon} ${severity.toUpperCase()}`.trim()} />;
+  const icon = severity === 'critical' ? '!! ' : severity === 'high' ? '! ' : '';
+  return (
+    <span className={`rounded-full border px-2.5 py-0.5 font-mono text-xs font-bold tracking-wider ${SEV_CLASS[severity] ?? ''}`}>
+      {icon}
+      {severity.toUpperCase()}
+    </span>
+  );
 }
 
 export function NoIncident() {
-  return <p className="empty">No incident yet: go to Incident and press "Declare incident".</p>;
+  return <p className="text-muted-foreground italic">No incident yet: open Incident and press "Declare incident" or "Run 2 AM drill".</p>;
 }

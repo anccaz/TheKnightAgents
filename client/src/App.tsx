@@ -1,26 +1,51 @@
 import { useState } from 'react';
 import { useSpacetimeDB, useTable } from 'spacetimedb/react';
-import { tables } from './module_bindings';
-import { PHASE_LABEL, ROLE_LABEL, SeverityChip, useCurrentIncident, useMe } from './components/shared';
-import AccessPage from './pages/access/AccessPage';
-import IncidentPage from './pages/incident/IncidentPage';
-import CommsPage from './pages/comms/CommsPage';
-import ScopePage from './pages/scope/ScopePage';
-import FraudPage from './pages/fraud/FraudPage';
-import LegalPage from './pages/legal/LegalPage';
-import AuditPage from './pages/audit/AuditPage';
+import { Radio, ShieldAlert, Users } from 'lucide-react';
+import { tables } from '@/module_bindings';
+import GradientASCII from '@/components/GradientASCII';
+import { PHASE_LABEL, ROLE_LABEL, SeverityChip, useCurrentIncident, useMe } from '@/components/shared';
+import { cn } from '@/lib/utils';
+import IncidentPage from '@/pages/incident/IncidentPage';
+import FeedPage from '@/pages/feed/FeedPage';
+import TeamPage, { JoinScreen } from '@/pages/team/TeamPage';
 
-// Simple state router: no router dependency.
+// Three pages. Simple state router: no router dependency.
 const PAGES = {
-  incident: { label: 'Incident', Page: IncidentPage },
-  comms: { label: 'Messages', Page: CommsPage },
-  scope: { label: 'What was hit', Page: ScopePage },
-  fraud: { label: 'Fraud alerts', Page: FraudPage },
-  legal: { label: 'Legal deadlines', Page: LegalPage },
-  audit: { label: 'Audit log', Page: AuditPage },
-  access: { label: 'Team & access', Page: AccessPage },
+  incident: { label: 'Incident', Icon: ShieldAlert, Page: IncidentPage, adminOnly: false },
+  feed: { label: 'Live Feed', Icon: Radio, Page: FeedPage, adminOnly: false },
+  team: { label: 'Team', Icon: Users, Page: TeamPage, adminOnly: true },
 } as const;
 type PageKey = keyof typeof PAGES;
+
+function Background() {
+  return (
+    <div className="pointer-events-none fixed inset-0 -z-10" aria-hidden="true">
+      <GradientASCII
+        colors={['#1e3fd8', '#82a6e0', '#38bcf6', '#ca0153', '#580534']}
+        shape="horizon"
+        characters=" =+xX0S8#@"
+        cellSize={18}
+        density={0.8}
+        glyphOpacity={0.85}
+        glow={0.4}
+        flicker={0.2}
+        softness={0.5}
+        scale={1.7}
+        flow={0.5}
+        speed={1}
+        gradientOpacity={0.9}
+        grain={0.08}
+        mouseInteraction
+        scrambleRadius={0.1}
+        clickEffect="burst"
+        intro
+        style={{ position: 'absolute', inset: 0 }}
+      />
+      {/* Dim the art behind content so text stays readable under stress */}
+      <div className="absolute inset-0 bg-gradient-to-b from-background/75 via-background/60 to-background/85" />
+    </div>
+  );
+}
 
 export default function App() {
   const { isActive, connectionError } = useSpacetimeDB();
@@ -30,51 +55,63 @@ export default function App() {
   const [page, setPage] = useState<PageKey>('incident');
 
   const online = users.filter(u => u.online);
-  // Not a member yet: the only useful screen is access (bootstrap / accept invite).
-  const current: PageKey = me ? page : 'access';
+  const visible = (Object.keys(PAGES) as PageKey[]).filter(k => !PAGES[k].adminOnly || me?.role === 'admin');
+  const current = visible.includes(page) ? page : 'incident';
   const { Page } = PAGES[current];
 
   return (
-    <div className="shell">
-      <header className="topbar">
-        <span className="brand">Breach Room</span>
-        {incident ? (
-          <span className="topbar-incident">
-            <strong>{incident.title}</strong>
-            <span className="phase-pill">Phase: {PHASE_LABEL[incident.phase] ?? incident.phase}</span>
-            <SeverityChip severity={incident.severity} />
+    <div className="min-h-screen text-foreground">
+      <Background />
+      <header className="sticky top-0 z-20 border-b border-border bg-background/70 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+          <span className="font-mono text-lg font-bold tracking-[0.25em] text-neon neon-text">
+            BREACH<span className="text-magenta magenta-text">//</span>ROOM
           </span>
-        ) : (
-          <span className="muted">No active incident</span>
-        )}
-        <span className="topbar-right">
-          <span title={online.map(u => u.name).join(', ')}>● {online.length} online</span>
-          {me && (
-            <span className="muted">
-              {me.name} ({ROLE_LABEL[me.role] ?? me.role})
+          {incident ? (
+            <span className="flex min-w-0 flex-wrap items-center gap-2">
+              <strong className="truncate">{incident.title}</strong>
+              <span className="rounded-full border border-neon/50 px-2.5 py-0.5 font-mono text-xs text-neon">
+                PHASE: {(PHASE_LABEL[incident.phase] ?? incident.phase).toUpperCase()}
+              </span>
+              <SeverityChip severity={incident.severity} />
             </span>
+          ) : (
+            <span className="text-muted-foreground">No active incident</span>
           )}
-          <span className={isActive ? 'conn-ok' : 'conn-bad'}>
-            {isActive ? 'Connected' : connectionError ? 'Connection failed' : 'Connecting…'}
+          <span className="ml-auto flex items-center gap-4 text-sm">
+            <span title={online.map(u => u.name).join(', ')} className="text-ok">● {online.length} online</span>
+            {me && (
+              <span className="text-muted-foreground">
+                {me.name} · {ROLE_LABEL[me.role] ?? me.role}
+              </span>
+            )}
+            <span className={cn('font-mono text-xs', isActive ? 'text-ok' : 'text-sev-critical')}>
+              {isActive ? '◉ LINKED' : connectionError ? '✕ OFFLINE' : '… CONNECTING'}
+            </span>
           </span>
-        </span>
+        </div>
+        {me && (
+          <nav className="mx-auto flex max-w-7xl gap-1 px-4" aria-label="Sections">
+            {visible.map(k => {
+              const { label, Icon } = PAGES[k];
+              return (
+                <button
+                  key={k}
+                  onClick={() => setPage(k)}
+                  aria-current={k === current ? 'page' : undefined}
+                  className={cn(
+                    'flex items-center gap-2 border-b-2 px-4 py-2 font-mono text-sm tracking-wider uppercase transition-colors',
+                    k === current ? 'border-neon text-neon neon-text' : 'border-transparent text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  <Icon className="size-4" /> {label}
+                </button>
+              );
+            })}
+          </nav>
+        )}
       </header>
-      <nav className="leftnav" aria-label="Sections">
-        {(Object.keys(PAGES) as PageKey[]).map(k => (
-          <button
-            key={k}
-            className={k === current ? 'nav-item active' : 'nav-item'}
-            aria-current={k === current ? 'page' : undefined}
-            disabled={!me && k !== 'access'}
-            onClick={() => setPage(k)}
-          >
-            {PAGES[k].label}
-          </button>
-        ))}
-      </nav>
-      <main className="main">
-        <Page />
-      </main>
+      <main className="mx-auto max-w-7xl px-4 py-6">{me ? <Page /> : <JoinScreen />}</main>
     </div>
   );
 }

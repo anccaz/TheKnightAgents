@@ -121,6 +121,18 @@ export type ScopeItem = __Infer<typeof ScopeItem>;
 export const ScopeItems = __t.object("ScopeItems", {});
 export type ScopeItems = __Infer<typeof ScopeItems>;
 
+export const StateImpact = __t.object("StateImpact", {
+  id: __t.u64(),
+  incidentId: __t.u64(),
+  state: __t.string(),
+  records: __t.u64(),
+  since: __t.timestamp(),
+});
+export type StateImpact = __Infer<typeof StateImpact>;
+
+export const StateImpacts = __t.object("StateImpacts", {});
+export type StateImpacts = __Infer<typeof StateImpacts>;
+
 export const Task = __t.object("Task", {
   id: __t.u64(),
   incidentId: __t.u64(),
