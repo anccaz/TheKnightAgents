@@ -34,7 +34,6 @@ Compared with what banks use today: Slack and Teams live inside the network and 
 - **Incident page.** Declare an incident, then follow a six-phase stepper (Detect, Analyze, Contain, Remove threat, Recover, Lessons learned) with one big "Done with this phase" button. Sections appear as the incident moves on: **What was hit** opens in Analyze, **Fraud: needs a decision** in Contain.
 - **Need-to-know access**, enforced on the server. Responders never receive money or customer details; lawyers see deadlines but not money; admins and executives see everything. Details are in the table below.
 - **Real bank data from Capital One's Nessie API.** One click imports the bank's customers and transactions. Customer addresses become people affected per state, which drives the notice obligations; withdrawals and bills are scanned for breach-style fraud (large withdrawals between 2 and 4 AM, bills to new payees) and become fraud alerts.
-- **AI agents (Gemini).** At every phase change, **Counsel** briefs #legal (deadlines, notices to draft, one legal risk) and **Comms** briefs #exec (situation, money, the next decision). Each agent sees only what its role may see, so Counsel never sees money. The agents advise; people decide.
 - **Incident advisor (Gemini).** Ask a question and get an answer built only from this incident's record, with cited sources. It can suggest actions, and each one needs a separate human confirmation.
 - **AI notice drafts.** Gemini drafts each breach notice into the privileged #legal channel for a lawyer to review.
 - **Live Feed.** The notice priority chart, live deadline countdowns, and one merged feed of chat, timeline and security events. Channels: #general, #containment, #legal (lawyers and leads) and #exec (leadership).
@@ -69,7 +68,7 @@ Fraud decisions, Nessie imports and AI agent runs are limited to incident leads 
 | Backend | SpacetimeDB 2.14 TypeScript module on Maincloud: private tables, per-role views, reducers, scheduled reducers, procedures with outbound HTTP |
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS v4, shadcn/ui (Base UI), React Bits (GradientASCII, ParticleText), lucide icons |
 | APIs | Capital One Nessie, Google Gemini (Flash-Lite) |
-| Testing | Vitest with SpacetimeDB's module test harness (roles, need-to-know, automation, advisor, AI agents, Nessie rules) |
+| Testing | Vitest with SpacetimeDB's module test harness (roles, need-to-know, automation, advisor, audit chain, Nessie rules) |
 
 ## Getting started
 
@@ -107,7 +106,7 @@ npm run dev
 On Windows, if `spacetime` is not found: `$env:Path += ";$env:LOCALAPPDATA\SpacetimeDB"` (PowerShell).
 
 ### API keys (optional)
-Gemini powers the advisor, the AI agents and the notice drafts; Nessie powers the bank data import. Put both in the root `.env` (gitignored, see `.env.example`) and publish with them loaded:
+Gemini powers the advisor and the notice drafts; Nessie powers the bank data import. Put both in the root `.env` (gitignored, see `.env.example`) and publish with them loaded:
 ```bash
 cd spacetimedb
 set -a; . ../.env; set +a
@@ -132,7 +131,7 @@ Then click **Import from Nessie (Capital One)** in an incident. A command-line i
 ## Project structure
 ```
 spacetimedb/            SpacetimeDB TypeScript module
-  src/index.ts          tables, views, reducers, drill, autopilot, AI agents
+  src/index.ts          tables, views, reducers, drill, autopilot
   src/advisor.ts        advisor prompt, citation and action checks
   src/nessie.ts         Nessie fraud rule and batching
   test/                 vitest suites
@@ -150,7 +149,6 @@ docs/                   plan and demo script
 ## Notes and limits
 - The legal rules (federal deadlines and state notice rules for TX, CA, FL, NY, plus first drafts for GA, NC and TN) are for the demo and are not legal advice.
 - Nessie has no freeze endpoint, so freezes are recorded in Knight Agent as the team's decision. In production, this is where the bank's core system would be called.
-- The AI agents' role limits are applied in our code rather than through real member accounts; they only advise and never act.
 - The technical id `breach-room` (database name, package names) is kept from the project's earlier name so existing databases and logins keep working.
 
 ## Team

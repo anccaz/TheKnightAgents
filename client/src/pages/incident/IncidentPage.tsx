@@ -111,7 +111,6 @@ export default function IncidentPage() {
   if (mode === 'overview')
     return (
       <div className="flex flex-col gap-5">
-        <AgentTrigger incidentId={incident.id} phase={incident.phase} />
         <section className="rounded-2xl border border-white/[0.06] bg-card/90 px-5 py-4 backdrop-blur">{header}</section>
         <OverviewView incident={incident} />
       </div>
@@ -119,7 +118,6 @@ export default function IncidentPage() {
   if (mode === 'conversation')
     return (
       <div className="flex flex-col gap-6">
-        <AgentTrigger incidentId={incident.id} phase={incident.phase} />
         <section className="glass p-5">{header}</section>
         <ConversationView incident={incident} />
       </div>
@@ -133,14 +131,12 @@ export default function IncidentPage() {
   );
   return (
     <div className="flex flex-col gap-6">
-      <AgentTrigger incidentId={incident.id} phase={incident.phase} />
       <section className="glass flex flex-col gap-4 p-5">
         {header}
         <PhaseStepper incidentId={incident.id} phase={incident.phase} />
       </section>
       <Detections incidentId={incident.id} />
       <NessiePanel incidentId={incident.id} />
-      <AgentsPanel incidentId={incident.id} phase={incident.phase} />
       {summary && <AfterActionSummary incident={incident} />}
       <div className="grid gap-6 lg:grid-cols-2">
         <IncidentRecord incident={incident} />
@@ -441,47 +437,6 @@ export function NessieImport({ incidentId }: { incidentId: bigint }) {
             : "Loads the bank's customers by state and scans their withdrawals and bills for fraud."}
       </span>
     </div>
-  );
-}
-
-/**
- * AI agents (Counsel, Comms) brief their channels once per phase. A lead's screen starts them when the phase changes;
- * the server makes sure it happens once. Each viewer only receives the briefings their role's channels allow.
- */
-function AgentTrigger({ incidentId, phase }: { incidentId: bigint; phase: string }) {
-  const lead = can(useMe(), LEADS);
-  const runAgents = useProcedure(procedures.runAgents);
-  useEffect(() => {
-    if (lead) runAgents({ incidentId }).catch(e => console.warn('AI agents:', e));
-  }, [lead, incidentId, phase]); // eslint-disable-line react-hooks/exhaustive-deps
-  return null;
-}
-
-function AgentsPanel({ incidentId }: { incidentId: bigint; phase: string }) {
-  const [channels] = useTable(tables.channels);
-  const [messages] = useTable(tables.messages);
-  const mine = new Map(channels.filter(c => c.incidentId === incidentId).map(c => [c.id, c.name]));
-  const latest = ['Counsel', 'Comms']
-    .map(name => messages.filter(m => mine.has(m.channelId) && m.text.startsWith(`🤖 ${name} agent`)).sort((a, b) => Number(b.id - a.id))[0])
-    .filter(m => m !== undefined);
-  if (!latest.length) return null;
-  return (
-    <Panel title="AI agents">
-      <div className="grid gap-3 lg:grid-cols-2">
-        {latest.map(m => {
-          const [head, ...body] = m.text.replace(/^🤖 /, '').split('\n');
-          return (
-            <div key={`${m.id}`} className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
-              <div className="mb-1 font-mono text-xs tracking-wider text-primary uppercase">
-                🤖 {head.replace(/:$/, '')} · #{mine.get(m.channelId)}
-              </div>
-              <p className="whitespace-pre-line text-foreground">{body.join('\n')}</p>
-            </div>
-          );
-        })}
-      </div>
-      <p className="mt-2 text-xs text-muted-foreground">Agents only see what their role may see, and they advise: people still make every decision.</p>
-    </Panel>
   );
 }
 

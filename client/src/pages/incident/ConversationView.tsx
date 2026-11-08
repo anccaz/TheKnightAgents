@@ -3,7 +3,7 @@
 // as the classic view.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useProcedure, useReducer, useTable } from 'spacetimedb/react';
-import { Bot, ChevronRight, Hash, Lock, Radar, Send, ShieldAlert, Snowflake, Sparkles, ThumbsUp, Zap } from 'lucide-react';
+import { ChevronRight, Hash, Lock, Radar, Send, ShieldAlert, Snowflake, Sparkles, ThumbsUp, Zap } from 'lucide-react';
 import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import { LEADS, PHASES, PHASE_LABEL, PRIVILEGED, SCOPE_LABEL, SEE_RECORDS, WRITERS, can, useCurrentIncident, useMe } from '@/components/shared';
@@ -18,7 +18,6 @@ import { AgentPrompts, AskBubbles, NessieCard, type Ask } from './AgentPrompts';
 type Incident = NonNullable<ReturnType<typeof useCurrentIncident>>;
 type Item =
   | { type: 'chat'; key: string; at: Date; who: string; mine: boolean; channel: string; privileged: boolean; text: string }
-  | { type: 'agent'; key: string; at: Date; channel: string; title: string; body: string }
   | { type: 'event'; key: string; at: Date; kind: string; who: string; text: string }
   | { type: 'phase'; key: string; at: Date; text: string }
   | { type: 'fraud'; key: string; at: Date; id: bigint; account: string; cents: bigint; reason: string; status: string }
@@ -72,14 +71,8 @@ function Thread({ incident }: { incident: Incident }) {
   for (const m of messages) {
     const ch = chName.get(m.channelId);
     if (!ch || (view !== 'all' && view !== ch.id)) continue;
-    const at = m.sentAt.toDate();
-    if (m.text.startsWith('🤖')) {
-      const [head, ...body] = m.text.replace(/^🤖 /, '').split('\n');
-      items.push({ type: 'agent', key: `m${m.id}`, at, channel: ch.name, title: head.replace(/:$/, ''), body: body.join('\n').replace(/\s*\[[A-Z]\d*(?:,\s*[A-Z]\d*)*\]/g, '') });
-    } else {
-      const hex = m.sender.toHexString();
-      items.push({ type: 'chat', key: `m${m.id}`, at, who: nameOf(hex) ?? 'Knight Agent', mine: hex === meHex, channel: ch.name, privileged: ch.privileged, text: m.text });
-    }
+    const hex = m.sender.toHexString();
+    items.push({ type: 'chat', key: `m${m.id}`, at: m.sentAt.toDate(), who: nameOf(hex) ?? 'Knight Agent', mine: hex === meHex, channel: ch.name, privileged: ch.privileged, text: m.text });
   }
   if (view === 'all') {
     for (const e of events) {
@@ -207,7 +200,6 @@ function Thread({ incident }: { incident: Incident }) {
         {items.map(it => (
           <li key={it.key} className="flex flex-col">
             {it.type === 'chat' && <ChatBubble it={it} />}
-            {it.type === 'agent' && <AgentCard it={it} />}
             {it.type === 'phase' && <PhaseDivider it={it} />}
             {it.type === 'event' && <EventLine it={it} />}
             {it.type === 'fraud' && <FraudCard it={it} canDecide={can(me, LEADS)} decide={decide} />}
@@ -294,22 +286,6 @@ function ChatBubble({ it }: { it: Extract<Item, { type: 'chat' }> }) {
   );
 }
 
-function AgentCard({ it }: { it: Extract<Item, { type: 'agent' }> }) {
-  return (
-    <div className="max-w-[90%] rounded-2xl bg-gradient-to-r from-violet-500/60 via-fuchsia-500/50 to-sky-500/60 p-px">
-      <div className="rounded-2xl bg-background/95 px-4 py-3">
-        <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
-          <span className="grid size-6 place-items-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white">
-            <Bot className="size-3.5" aria-hidden="true" />
-          </span>
-          <span className="font-semibold text-violet-200">{it.title}</span>
-          <span className="text-muted-foreground">· #{it.channel} · {time(it.at)}</span>
-        </div>
-        <p className="text-sm whitespace-pre-line text-foreground/90">{it.body}</p>
-      </div>
-    </div>
-  );
-}
 
 function PhaseDivider({ it }: { it: Extract<Item, { type: 'phase' }> }) {
   return (

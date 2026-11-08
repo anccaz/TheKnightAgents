@@ -2,7 +2,7 @@
 // numbers, then simple cards. Every number comes from the role-filtered views, so a tile your role may not see says so.
 import { useEffect, useState, type ReactNode } from 'react';
 import { useReducer, useTable } from 'spacetimedb/react';
-import { Bot, Clock, Landmark, Lock, Radar, ShieldAlert, Snowflake, ThumbsUp, Users, Wallet, Zap } from 'lucide-react';
+import { Clock, Landmark, Lock, Radar, ShieldAlert, Snowflake, ThumbsUp, Users, Wallet, Zap } from 'lucide-react';
 import { reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import { LEADS, PHASES, PHASE_LABEL, SEE_ALL, SEE_RECORDS, can, useCurrentIncident, useMe } from '@/components/shared';
@@ -288,21 +288,9 @@ function DeadlinesCard({ incidentId, hidden }: { incidentId: bigint; hidden: boo
 
 function ActivityCard({ incidentId }: { incidentId: bigint }) {
   const [events] = useTable(tables.timelineEvents);
-  const [messages] = useTable(tables.messages);
-  const [channels] = useTable(tables.channels);
-  const mine = new Set(channels.filter(c => c.incidentId === incidentId).map(c => c.id));
-  const brief = messages.filter(m => mine.has(m.channelId) && m.text.startsWith('🤖')).sort((a, b) => Number(b.id - a.id))[0];
-  const recent = events.filter(e => e.incidentId === incidentId).sort((a, b) => Number(b.id - a.id)).slice(0, 6);
+  const recent = events.filter(e => e.incidentId === incidentId).sort((a, b) => Number(b.id - a.id)).slice(0, 8);
   return (
     <Card title="Latest" icon={<Radar />}>
-      {brief && (
-        <div className="rounded-xl bg-violet-500/10 p-3 text-sm">
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-violet-200">
-            <Bot className="size-3.5" aria-hidden="true" /> {brief.text.split('\n')[0].replace(/^🤖 /, '').replace(/:$/, '')}
-          </div>
-          <p className="line-clamp-4 whitespace-pre-line text-foreground/85">{brief.text.split('\n').slice(1).join('\n').replace(/\s*\[[A-Z]\d*(?:,\s*[A-Z]\d*)*\]/g, '')}</p>
-        </div>
-      )}
       <ul className="flex flex-col gap-2.5 text-sm">
         {recent.length === 0 && <li className="text-muted-foreground">Nothing yet.</li>}
         {recent.map(e => (
