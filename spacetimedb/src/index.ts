@@ -9,6 +9,7 @@ const PHASES = ['detect', 'analyze', 'contain', 'eradicate', 'recover', 'post_in
 const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 const SCOPE_STATUSES = ['encrypted', 'exfiltrated', 'accessed', 'unknown', 'clear'] as const;
 const FRAUD_STATUSES = ['open', 'frozen', 'dismissed'] as const;
+const NOTICE_STATUSES = ['not_started', 'drafted', 'sent'] as const;
 const PRIVILEGED_ROLES = ['admin', 'incident_lead', 'legal'];
 
 // Every table is private. Clients read only through the views at the bottom,
@@ -157,6 +158,19 @@ const stateImpact = table(
   }
 );
 
+// Progress on each notice the bank owes (e.g. "TX-Customers", "TX-Attorney General", "clock-3").
+const notifyStatus = table(
+  {},
+  {
+    id: t.u64().primaryKey().autoInc(),
+    incidentId: t.u64().index(),
+    notice: t.string(),
+    status: t.string(),
+    updatedAt: t.timestamp(),
+    updatedBy: t.identity(),
+  }
+);
+
 // Pending steps of a running attack drill; each row fires runDrillStep at its time.
 const drillStep = table(
   {},
@@ -172,6 +186,7 @@ const db = schema({
   owner,
   drillStep,
   stateImpact,
+  notifyStatus,
   user,
   incident,
   timelineEvent,
@@ -490,6 +505,21 @@ export const setStateImpact = db.reducer(
   }
 );
 
+export const setNotifyStatus = db.reducer(
+  { incidentId: t.u64(), notice: t.string(), label: t.string(), status: t.string() },
+  (ctx, { incidentId, notice, label, status }) => {
+    requireRole(ctx, 'incident_lead', 'responder', 'legal');
+    requireIncident(ctx, incidentId);
+    oneOf(status, NOTICE_STATUSES, 'notice status');
+    const existing = [...ctx.db.notifyStatus.incidentId.filter(incidentId)].find(n => n.notice === notice);
+    const row = { incidentId, notice, status, updatedAt: ctx.timestamp, updatedBy: ctx.sender };
+    if (existing) ctx.db.notifyStatus.id.update({ ...row, id: existing.id });
+    else ctx.db.notifyStatus.insert({ ...row, id: 0n });
+    timeline(ctx, incidentId, 'action', `Notice ${status === 'sent' ? 'sent' : status === 'drafted' ? 'drafted' : 'reopened'}: ${label}`);
+    if (status === 'sent') audit(ctx, 'notice_sent', label);
+  }
+);
+
 // ---------- Attack drill: a scripted attack that plays out live ----------
 // Each step runs `waitSec` after the previous one. Events go through the same helpers
 // as human actions, so the auto-rules (legal clocks, auto-freeze) fire on their own.
@@ -583,6 +613,9 @@ export const fraudAlerts = db.view({ name: 'fraudAlerts', public: true }, t.arra
 );
 export const stateImpacts = db.view({ name: 'stateImpacts', public: true }, t.array(stateImpact.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.stateImpact.iter()] : []
+);
+export const notifyStatuses = db.view({ name: 'notifyStatuses', public: true }, t.array(notifyStatus.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.notifyStatus.iter()] : []
 );
 export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
   roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []

@@ -99,6 +99,19 @@ export type Message = __Infer<typeof Message>;
 export const Messages = __t.object("Messages", {});
 export type Messages = __Infer<typeof Messages>;
 
+export const NotifyStatus = __t.object("NotifyStatus", {
+  id: __t.u64(),
+  incidentId: __t.u64(),
+  notice: __t.string(),
+  status: __t.string(),
+  updatedAt: __t.timestamp(),
+  updatedBy: __t.identity(),
+});
+export type NotifyStatus = __Infer<typeof NotifyStatus>;
+
+export const NotifyStatuses = __t.object("NotifyStatuses", {});
+export type NotifyStatuses = __Infer<typeof NotifyStatuses>;
+
 export const Owner = __t.object("Owner", {
   id: __t.u8(),
   identity: __t.identity(),

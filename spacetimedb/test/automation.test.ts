@@ -68,3 +68,16 @@ test('state impact upserts per state and rejects bad codes', () => {
   expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.stateImpact.iter()].map(r => [r.state, r.records]))).toEqual([['TX', 300n]]);
   expect(() => h.withReducerTx(as('admin'), ctx => mod.setStateImpact(ctx, { incidentId: 1n, state: 'Texas', records: 1n }))).toThrow(/Invalid state/);
 });
+
+test('notice status upserts, audits sends, and is blocked for viewers', () => {
+  const h = setup();
+  const set = (status: string) => (ctx: any) => mod.setNotifyStatus(ctx, { incidentId: 1n, notice: 'TX-Customers', label: 'Texas customers', status });
+  h.withReducerTx(as('admin'), set('drafted'));
+  h.withReducerTx(as('admin'), set('sent'));
+  expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.notifyStatus.iter()].map(n => n.status))).toEqual(['sent']);
+  expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.auditLog.iter()].some(a => a.action === 'notice_sent'))).toBe(true);
+  expect(() => h.withReducerTx(as('admin'), set('lost'))).toThrow(/Invalid notice status/);
+  const viewer = h.withReducerTx(as('viewer'), ctx => ctx.sender);
+  h.withReducerTx(as('owner'), ctx => mod.addMember(ctx, { target: viewer, name: 'v', email: 'v', role: 'exec_viewer' }));
+  expect(() => h.withReducerTx(as('viewer'), set('sent'))).toThrow(/Requires role/);
+});

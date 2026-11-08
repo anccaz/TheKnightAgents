@@ -1,15 +1,24 @@
 // "Who must we tell first?" Each bubble is one notice the bank owes.
 // x = time left (log days, left = due soonest), y = people affected (log), size = people, color = who is told.
 import { useEffect, useMemo, useState } from 'react';
-import { useTable } from 'spacetimedb/react';
-import { tables } from '@/module_bindings';
+import { useReducer, useTable } from 'spacetimedb/react';
+import { reducers, tables } from '@/module_bindings';
 import { countdown, obligationsFor, stateName } from '@/lib/notifyRules';
+import { useRun } from '@/components/Toast';
+import { can, useMe } from '@/components/shared';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 // Validated with the dataviz palette checker on the #0b0f22 panel (CVD ΔE 18.4, contrast >= 3:1).
 const COLOR = { customers: '#1f9ad8', authorities: '#ff2d6f' } as const;
 type Group = keyof typeof COLOR;
-type Notice = { id: string; label: string; who: string; group: Group; people: number; due: Date | null; rule: string; short: string };
+type Status = 'not_started' | 'drafted' | 'sent';
+const STATUS_LABEL: Record<Status, string> = { not_started: 'Not started', drafted: 'Drafted', sent: 'Sent' };
+const NOTIFIERS = ['admin', 'incident_lead', 'responder', 'legal'];
+type Notice = {
+  id: string; label: string; who: string; group: Group; people: number; due: Date | null; rule: string; short: string;
+  status: Status; clockId?: bigint;
+};
 
 const W = 640, H = 380, PAD = { l: 56, r: 20, t: 20, b: 44 };
 const X_MIN = 0.5, X_MAX = 90; // days
@@ -20,6 +29,11 @@ const fmt = (n: number) => (n >= 1000 ? `${+(n / 1000).toFixed(n >= 10_000 ? 0 :
 export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint }) {
   const [impacts] = useTable(tables.stateImpacts);
   const [clocks] = useTable(tables.legalClocks);
+  const [statuses] = useTable(tables.notifyStatuses);
+  const me = useMe();
+  const setNotifyStatus = useReducer(reducers.setNotifyStatus);
+  const completeLegalClock = useReducer(reducers.completeLegalClock);
+  const run = useRun();
   const [now, setNow] = useState(Date.now());
   const [hover, setHover] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
@@ -31,6 +45,8 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
   const notices = useMemo(() => {
     const rows = impacts.filter(r => r.incidentId === incidentId && r.records > 0n);
     const total = rows.reduce((n, r) => n + Number(r.records), 0);
+    const statusOf = (id: string) =>
+      (statuses.find(s => s.incidentId === incidentId && s.notice === id)?.status ?? 'not_started') as Status;
     const out: Notice[] = [];
     for (const r of rows) {
       const people = Number(r.records);
@@ -45,13 +61,16 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
           people,
           due: o.dueAt,
           rule: o.text,
+          status: statusOf(`${r.state}-${o.who}`),
         });
       }
     }
-    // Federal deadlines (state clocks are already covered per state above).
+    // Federal deadlines (state clocks are already covered per state above). A filed clock counts as sent.
     for (const c of clocks)
-      if (c.incidentId === incidentId && !c.done && !c.regime.startsWith('tx_') && total > 0)
+      if (c.incidentId === incidentId && !c.regime.startsWith('tx_') && total > 0)
         out.push({
+          clockId: c.id,
+          status: c.done ? 'sent' : statusOf(`clock-${c.id}`),
           id: `clock-${c.id}`,
           label: c.label,
           short: c.regime === 'bank_regulator' ? 'Regulator' : c.regime === 'sec_8k' ? 'SEC' : c.label.split(' ')[0],
@@ -62,7 +81,13 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
           rule: 'Federal deadline',
         });
     return out.sort((a, b) => (a.due?.getTime() ?? 0) - (b.due?.getTime() ?? 0));
-  }, [impacts, clocks, incidentId]);
+  }, [impacts, clocks, statuses, incidentId]);
+
+  const mark = (n: Notice, status: Status) => {
+    if (status === 'sent' && !window.confirm(`Mark "${n.label}" as sent? This is recorded in the audit log.`)) return;
+    run(setNotifyStatus({ incidentId, notice: n.id, label: n.label, status }), `${n.label}: ${STATUS_LABEL[status]}`);
+    if (status === 'sent' && n.clockId != null) run(completeLegalClock({ clockId: n.clockId }));
+  };
 
   const maxPeople = Math.max(10, ...notices.map(n => n.people));
   const yMax = 10 ** Math.ceil(Math.log10(maxPeople * 1.5));
@@ -90,8 +115,8 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
       pos.set(n.id, { x, y: ly(n.people), label, cx: lx(daysLeft(n)) });
     });
   }
-  const shown = notices.find(n => n.id === (hover ?? picked));
-  const sent = 0; // shortcut: drafted/sent tracking lands with Lane B's notifyStatus table
+  const shown = notices.find(n => n.id === hover); // tooltip on hover/focus only, so it never covers the chart after a click
+  const sent = notices.filter(n => n.status === 'sent').length;
 
   return (
     <section aria-label="Notification priority">
@@ -172,7 +197,7 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
                     onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setPicked(n.id)}
                   >
                     <circle cx={x} cy={y} r={r(n.people) + 6} fill="transparent" />
-                    <circle cx={x} cy={y} r={r(n.people)} fill={COLOR[n.group]} fillOpacity={active ? 1 : 0.85} stroke={active ? '#ffffff' : '#0b0f22'} strokeWidth={2} />
+                    <circle cx={x} cy={y} r={r(n.people)} fill={COLOR[n.group]} fillOpacity={n.status === 'sent' ? 0.12 : active ? 1 : 0.85} stroke={active ? '#ffffff' : n.status === 'sent' ? COLOR[n.group] : '#0b0f22'} strokeWidth={2} strokeDasharray={n.status === 'drafted' ? '4 3' : undefined} />
                     {overdue && <circle cx={x} cy={y} r={r(n.people) + 4} fill="none" stroke="#ff2d6f" strokeWidth={2} strokeDasharray="3 3" />}
                     {label && labelled.has(n.id) && (
                       <text
@@ -198,7 +223,7 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
               <div className="font-bold">{shown.label}</div>
               <div className="text-muted-foreground">{shown.people.toLocaleString()} people · {shown.rule}</div>
               <div className="mt-1 font-mono text-primary">
-                {shown.due ? `${countdown(shown.due, now)} left · ${shown.due.toLocaleDateString()}` : 'As soon as possible'}
+                {shown.status === 'sent' ? '✓ Sent' : shown.due ? `${countdown(shown.due, now)} left · ${shown.due.toLocaleDateString()}` : 'As soon as possible'}
               </div>
             </div>
           )}
@@ -219,13 +244,35 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
                 )}
               >
                 <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ background: COLOR[n.group] }} aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate">
+                <span className={cn('min-w-0 flex-1 truncate', n.status === 'sent' && 'text-muted-foreground line-through')}>
                   {n.label} <span className="text-muted-foreground">· {fmt(n.people)}</span>
                 </span>
-                <span className={cn('font-mono text-xs', n.due && n.due.getTime() - now < 7 * DAY ? 'text-magenta' : 'text-muted-foreground')}>
-                  {countdown(n.due, now)}
+                <span
+                  className={cn(
+                    'rounded-full border px-1.5 text-[10px] font-semibold uppercase',
+                    n.status === 'sent' ? 'border-primary text-primary' : n.status === 'drafted' ? 'border-foreground/60 text-foreground' : 'border-border text-muted-foreground'
+                  )}
+                >
+                  {n.status === 'sent' ? '✓ ' : ''}
+                  {STATUS_LABEL[n.status]}
+                </span>
+                <span className={cn('font-mono text-xs', n.status !== 'sent' && n.due && n.due.getTime() - now < 7 * DAY ? 'text-magenta' : 'text-muted-foreground')}>
+                  {n.status === 'sent' ? 'done' : countdown(n.due, now)}
                 </span>
               </button>
+              {picked === n.id && can(me, NOTIFIERS) && (
+                <div className="mt-1 mb-1 flex flex-wrap gap-1.5 pl-5">
+                  {n.status === 'not_started' && (
+                    <Button size="sm" variant="outline" onClick={() => mark(n, 'drafted')}>Mark drafted</Button>
+                  )}
+                  {n.status !== 'sent' && (
+                    <Button size="sm" onClick={() => mark(n, 'sent')}>Mark sent</Button>
+                  )}
+                  {n.status === 'sent' && n.clockId == null && (
+                    <Button size="sm" variant="ghost" onClick={() => mark(n, 'drafted')}>Reopen</Button>
+                  )}
+                </div>
+              )}
             </li>
           ))}
           {notices.length > 0 && <li className="pt-1 text-xs text-muted-foreground">State rules: verify before relying on them. Not legal advice.</li>}
