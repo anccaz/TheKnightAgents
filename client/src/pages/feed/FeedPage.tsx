@@ -149,6 +149,9 @@ export default function FeedPage() {
       <div className="glass p-3">
         <div className="mb-2 flex items-center gap-2">
           <h2 className=" font-heading text-sm font-bold tracking-widest text-white uppercase">Deadlines</h2>
+          <span className="text-xs text-muted-foreground" title="Bank regulator 36h (OCC/Fed/FDIC rule), SEC 8-K 4 business days if material (public companies), Texas AG 30 days at 250+ Texans, Texas customers 60 days. Clocks start when data is first marked stolen, our stand-in for when the bank determines the incident.">
+            Federal + Texas rules, simplified. Not legal advice: Legal confirms each one.
+          </span>
           <Button size="xs" variant="outline" className="ml-auto" aria-expanded={showForm} onClick={() => setShowForm(s => !s)}>
             {showForm ? <ChevronDown /> : <Plus />} Add a deadline
           </Button>

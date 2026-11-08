@@ -60,6 +60,7 @@ import UpsertScopeItemReducer from "./upsert_scope_item_reducer";
 // Import all procedure arg schemas
 import * as AskAdvisorProcedure from "./ask_advisor_procedure";
 import * as DraftNoticeProcedure from "./draft_notice_procedure";
+import * as ImportFromNessieProcedure from "./import_from_nessie_procedure";
 
 // Import all table schema definitions
 import AuditEntriesRow from "./audit_entries_table";
@@ -69,6 +70,7 @@ import IncidentsRow from "./incidents_table";
 import LegalClocksRow from "./legal_clocks_table";
 import MembersRow from "./members_table";
 import MessagesRow from "./messages_table";
+import NessieCursorsRow from "./nessie_cursors_table";
 import NotifyStatusesRow from "./notify_statuses_table";
 import PhaseAdvancesRow from "./phase_advances_table";
 import ScopeItemsRow from "./scope_items_table";
@@ -130,6 +132,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, MessagesRow),
+  nessieCursors: __table({
+    name: 'nessieCursors',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, NessieCursorsRow),
   notifyStatuses: __table({
     name: 'notifyStatuses',
     indexes: [
@@ -211,6 +220,7 @@ const reducersSchema = __reducers(
 const proceduresSchema = __procedures(
   __procedureSchema("ask_advisor", AskAdvisorProcedure.params, AskAdvisorProcedure.returnType),
   __procedureSchema("draft_notice", DraftNoticeProcedure.params, DraftNoticeProcedure.returnType),
+  __procedureSchema("import_from_nessie", ImportFromNessieProcedure.params, ImportFromNessieProcedure.returnType),
 );
 
 /** The remote SpacetimeDB module schema, both runtime and type information. */

@@ -107,6 +107,17 @@ export type Message = __Infer<typeof Message>;
 export const Messages = __t.object("Messages", {});
 export type Messages = __Infer<typeof Messages>;
 
+export const NessieCursor = __t.object("NessieCursor", {
+  incidentId: __t.u64(),
+  offset: __t.u32(),
+  total: __t.u32(),
+  at: __t.timestamp(),
+});
+export type NessieCursor = __Infer<typeof NessieCursor>;
+
+export const NessieCursors = __t.object("NessieCursors", {});
+export type NessieCursors = __Infer<typeof NessieCursors>;
+
 export const NotifyStatus = __t.object("NotifyStatus", {
   id: __t.u64(),
   incidentId: __t.u64(),

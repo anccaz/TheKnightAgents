@@ -1,5 +1,7 @@
 # TheKnightAgents · Knight Agent
 
+> When a bank gets hacked, its communication infrastructure can no longer be trusted. Knight Agent is the independent command center that keeps security, fraud, legal and leadership coordinated until the bank recovers.
+
 An out-of-band, real-time **cyber incident command center** for a bank's response team ("First Avon Bank" in the demo). It keeps the incident record, what data was hit, legal notice deadlines, fraud decisions and team chat in one place, and it runs entirely outside the compromised network, so it still works when the attacker owns email and Slack.
 
 Built at HackUTD 2026 for three tracks:
@@ -75,7 +77,7 @@ spacetime publish --server http://127.0.0.1:3010 breach-room --env-only
 ```
 By default it uses the newest stable Flash-Lite model your key has; set `GEMINI_MODEL=<name>` to pin one. If Gemini is busy it posts a labeled template draft instead; without a key the button shows an error and everything else works.
 
-**Careful:** publishing (or resetting) a database from a terminal where `GEMINI_API_KEY` is not set clears the stored key. If the advisor suddenly says "Rule-based (AI is not configured)", set the key again with `--env-only`. Gemini keys from AI Studio start with `AIza`. Never paste a key into chat or a commit; rotate it if you do.
+**Careful:** publishing (or resetting) a database from a terminal where `GEMINI_API_KEY` (or `NESSIE_API_KEY`) is not set clears the stored key. Easiest: keep both in the root `.env` and publish with `set -a; . ../.env; set +a; npm run publish:local` from `spacetimedb/` (Git Bash). If the advisor suddenly says "Rule-based (AI is not configured)", set the key again with `--env-only`. Gemini keys from AI Studio start with `AIza`. Never paste a key into chat or a commit; rotate it if you do.
 
 **First admin.** Open the app, click **Copy my ID**, then the person who published the database runs:
 ```bash
@@ -120,7 +122,11 @@ Rules live in `spacetimedb/src/index.ts`: `DRILL`, `LEGAL_RULES`, `AUTO_FREEZE_C
 Per-sponsor demo scripts: [docs/demo-script.md](docs/demo-script.md). A recorded 2.5-minute autopilot demo with voice-over exists locally in `demo/knight-agent-demo.mp4` (not committed; videos are too big for git, share it through Drive or Devpost).
 
 ## Demo: real bank data from Nessie (Capital One)
-Instead of the scripted drill, an incident can be filled from Capital One's Nessie API. Put `NESSIE_API_KEY=...` in the root `.env` (never commit it). The `spacetime` CLI identity must be a member: run `spacetime login show`, then add that ID on **Team** (incident lead or admin if it should also create incidents, responder is enough to import).
+**In the app (one click).** On the Incident page, **Import from Nessie (Capital One)** sits in Incoming detections. The server (a SpacetimeDB procedure, like the Gemini calls) reads Nessie: customers by state fill **Who must we tell first**, their records are marked stolen (legal clocks start), and withdrawals/bills are scanned with the same fraud rule as the CLI importer. Procedures make HTTP calls one at a time, so each click checks the next 20 accounts plus the "hot" ones (the live `--plant` targets and accounts already flagged); click again for the next batch. Reruns never duplicate alerts. It needs `NESSIE_API_KEY` in the database environment (publish with it set, or `--env-only`). Tested locally: 786 customers in 6 states, 3 real planted withdrawals flagged in about 15 seconds. Live moment: run `node scripts/seed-nessie.mjs --plant`, then click **Check next accounts in Nessie**: the new withdrawal appears (and freezes if the team is in Contain).
+
+Freezes are recorded in Knight Agent as the team's decision; Nessie has no freeze endpoint, so nothing is changed in Nessie itself. In production this is where the bank's core system would be called.
+
+**From the terminal.** Instead of the scripted drill, an incident can be filled from Capital One's Nessie API. Put `NESSIE_API_KEY=...` in the root `.env` (never commit it). The `spacetime` CLI identity must be a member: run `spacetime login show`, then add that ID on **Team** (incident lead or admin if it should also create incidents, responder is enough to import).
 
 **1. Seed the bank** (about 1 minute):
 ```bash
@@ -159,6 +165,7 @@ There is no app server. The browser talks to SpacetimeDB directly over a websock
 spacetimedb/              SpacetimeDB TypeScript module (tables, views, reducers, drill)
   src/index.ts            the whole backend and data contract
   src/advisor.ts          advisor prompt, citation and action checks, rule-based fallback
+  src/nessie.ts           Nessie fraud rule and batching for the in-app import
   test/                   vitest: roles, automation, advisor
 client/                   React 18 + Vite + Tailwind
   src/App.tsx             header, 3 tabs, background
@@ -177,7 +184,7 @@ docs/                     plan.md, agent-prompts.md, demo-script.md
 |---|---|---|---|
 | A | Annie | Access control, roles, audit log, views, Maincloud | `addMember` `setRole` `removeMember` |
 | B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `signOffTask` `sendMessage` `setNotifyStatus` `startDrill` `startAutopilotDrill` `stopDrill` `stayInPhase` `askAdvisor` `logAdvisorAction` |
-| C | Navya | Nessie seed and importer, scope, fraud watch | `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` `setStateImpact` |
+| C | Navya | Nessie seed and importer, scope, fraud watch | `importFromNessie` `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` `setStateImpact` |
 | D | Navya | Legal rules, Gemini drafts, Devpost, pitch | `startLegalClock` `completeLegalClock` `draftNotice` |
 
 ## Checklist

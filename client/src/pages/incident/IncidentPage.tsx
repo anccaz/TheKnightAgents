@@ -1,9 +1,9 @@
 // Lane B owner: the whole incident on one screen: declare, phase, record, tasks, what was hit, fraud decisions.
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { Identity } from 'spacetimedb';
-import { useReducer, useTable } from 'spacetimedb/react';
+import { useProcedure, useReducer, useTable } from 'spacetimedb/react';
 import { BarChart3, Check, CircleHelp, Download, Eye, Lock, Play, Radar, ShieldCheck, Snowflake, Square, ThumbsUp, UserCheck, Zap, type LucideIcon } from 'lucide-react';
-import { reducers, tables } from '@/module_bindings';
+import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import AfterActionSummary from '@/components/AfterActionSummary';
 import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SCOPE_STATUSES, SEVERITIES, SIGNOFF_TASKS, SeverityChip, WRITERS, can, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
@@ -297,6 +297,7 @@ function Detections({ incidentId }: { incidentId: bigint }) {
         <span className="font-mono text-xs font-normal tracking-normal text-muted-foreground normal-case">· live from security tools, drill and bank feed</span>
         {items.length > 0 && <span className="ml-auto font-mono text-xs text-muted-foreground">{items.length} total</span>}
       </h2>
+      <NessieImport incidentId={incidentId} />
       {items.length === 0 ? (
         <p className="text-muted-foreground italic">Nothing detected yet. Alerts appear here the moment a tool reports them.</p>
       ) : (
@@ -313,6 +314,41 @@ function Detections({ incidentId }: { incidentId: bigint }) {
         </ul>
       )}
     </section>
+  );
+}
+
+/** Pull the bank's customers and transactions from Capital One's Nessie API; the server scans the next batch of accounts. */
+function NessieImport({ incidentId }: { incidentId: bigint }) {
+  const me = useMe();
+  const importFromNessie = useProcedure(procedures.importFromNessie);
+  const [cursors] = useTable(tables.nessieCursors);
+  const run = useRun();
+  const [busy, setBusy] = useState(false);
+  const [last, setLast] = useState<{ customers: number; states: number; accounts: number; checked: number; raised: number } | null>(null);
+  if (!can(me, WRITERS)) return null;
+  const cur = cursors.find(c => c.incidentId === incidentId);
+  const click = () => {
+    setBusy(true);
+    run(
+      importFromNessie({ incidentId })
+        .then(json => setLast(JSON.parse(json)))
+        .finally(() => setBusy(false)),
+      'Nessie import finished'
+    );
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+      <Button type="button" variant="outline" disabled={busy} onClick={click}>
+        <Download /> {busy ? 'Reading Nessie…' : cur ? 'Check next accounts in Nessie' : 'Import from Nessie (Capital One)'}
+      </Button>
+      <span className="min-w-0 flex-1 text-muted-foreground">
+        {last
+          ? `${last.customers} customers in ${last.states} states · checked ${last.checked} of ${last.accounts} accounts · ${last.raised} new fraud alert${last.raised === 1 ? '' : 's'}`
+          : cur
+            ? `Last import ${cur.at.toDate().toLocaleTimeString()} · ${cur.total} accounts in the bank; each click checks the next batch`
+            : "Loads the bank's customers by state and scans their withdrawals and bills for fraud."}
+      </span>
+    </div>
   );
 }
 
@@ -592,6 +628,7 @@ function Fraud({ incidentId, phase }: { incidentId: bigint; phase: string }) {
     <Panel title={<>Fraud: needs a decision {open.length > 0 && <span className="text-sev-critical">({open.length})</span>}</>}>
       <p className="text-sm text-muted-foreground">
         Transfers of $10,000 or more freeze automatically {containing ? 'now that the team is in Contain' : 'when the team reaches Contain'}. Smaller ones need a person to decide.
+        {' '}A freeze is recorded here as the team's decision; in production it would call the bank's core system (Nessie has no freeze API).
       </p>
       {frozen.length > 0 && (
         <details className="rounded-lg border border-neon/40 px-3 py-2">

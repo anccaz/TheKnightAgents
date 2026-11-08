@@ -3,6 +3,7 @@
 import { schema, table, t, SenderError, ScheduleAt } from 'spacetimedb/server';
 import { Timestamp, TimeDuration } from 'spacetimedb';
 import { ADVISOR_SCHEMA, advisorPrompt, checkReply, left, ruleBasedReply, type AdvisorFacts } from './advisor';
+import { NESSIE_BASE, accountLabel, batch, countByState, isSuspicious, normalizeActivity, type Activity, type NessieAccount, type NessieCustomer } from './nessie';
 
 // ---------- Enums (kept as strings; validated in reducers) ----------
 const ROLES = ['admin', 'incident_lead', 'responder', 'legal', 'exec_viewer'] as const;
@@ -212,6 +213,17 @@ const signoff = table(
   }
 );
 
+// Where the in-app Nessie import got to: each click scans the next batch of accounts (wrapping around).
+const nessieCursor = table(
+  {},
+  {
+    incidentId: t.u64().primaryKey(),
+    offset: t.u32(),
+    total: t.u32(), // accounts in Nessie at the last import
+    at: t.timestamp(),
+  }
+);
+
 // Pending steps of a running attack drill; each row fires runDrillStep at its time.
 const drillStep = table(
   {},
@@ -233,6 +245,7 @@ const db = schema(
     phaseHold,
     autopilotStep,
     signoff,
+    nessieCursor,
     user,
     incident,
     timelineEvent,
@@ -251,6 +264,7 @@ const db = schema(
     env: {
       GEMINI_API_KEY: t.string().optional(),
       GEMINI_MODEL: t.string().optional(),
+      NESSIE_API_KEY: t.string().optional(), // Capital One Nessie, for the in-app "Import from Nessie" button
     },
   }
 );
@@ -1005,6 +1019,91 @@ export const draftNotice = db.procedure(
 );
 
 
+// ---------- Import from Nessie (Capital One): the bank's real customer and transaction data, in one click ----------
+// Same rules as scripts/import-nessie.mjs. Procedures make HTTP calls one at a time, so each click scans a batch of
+// accounts (plus the "hot" ones: live-demo targets and accounts already flagged) and remembers where it stopped.
+const NESSIE_BATCH = 20;
+const NESSIE_HOT_BALANCE = 75_000; // seed-nessie.mjs funds its live --plant targets to at least this
+
+export const importFromNessie = db.procedure({ incidentId: t.u64() }, t.string(), (ctx, { incidentId }) => {
+  const { offset, flagged } = ctx.withTx(tx => {
+    requireRole(tx, ...WRITERS);
+    requireIncident(tx, incidentId);
+    const flaggedAccounts = new Set([...tx.db.scopeItem.incidentId.filter(incidentId)].filter(s => s.assetType === 'account').map(s => s.assetRef));
+    return { offset: tx.db.nessieCursor.incidentId.find(incidentId)?.offset ?? 0, flagged: flaggedAccounts };
+  });
+  let key: string | undefined;
+  try {
+    key = ctx.env.NESSIE_API_KEY;
+  } catch {
+    key = undefined;
+  }
+  if (!key) throw new SenderError('Nessie is off: publish the module with NESSIE_API_KEY set (see README).');
+
+  // GET a Nessie list. The URL carries the key, so errors only ever name the path.
+  const get = (path: string): any[] => {
+    let r: { ok: boolean; status: number; json(): any };
+    try {
+      r = ctx.http.fetch(`${NESSIE_BASE}${path}?key=${encodeURIComponent(key!)}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        timeout: TimeDuration.fromMillis(10_000),
+      });
+    } catch {
+      throw new SenderError(`Nessie did not answer (${path})`);
+    }
+    if (r.status === 404 || (r.status === 400 && path.endsWith('/bills'))) return []; // "none found" / old bills
+    if (!r.ok) throw new SenderError(`Nessie ${path} returned HTTP ${r.status}`);
+    const j = r.json();
+    return Array.isArray(j) ? j : [];
+  };
+
+  const customers = get('/customers') as NessieCustomer[];
+  if (!customers.length) throw new SenderError('No customers in Nessie yet: run scripts/seed-nessie.mjs first.');
+  const accounts = (get('/accounts') as NessieAccount[]).sort((a, b) => (a._id < b._id ? -1 : 1));
+  const names = new Map(customers.map(c => [c._id, `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim()]));
+  const { picked, next } = batch(accounts, offset, NESSIE_BATCH);
+  const hot = accounts.filter(a => (a.balance ?? 0) >= NESSIE_HOT_BALANCE || flagged.has(a._id));
+  const toScan = [...new Map([...hot, ...picked].map(a => [a._id, a])).values()];
+  const found: { a: NessieAccount; item: Activity; reason: string }[] = [];
+  for (const a of toScan)
+    for (const kind of ['withdrawal', 'bill'] as const)
+      for (const raw of get(`/accounts/${a._id}/${kind}s`)) {
+        const item = normalizeActivity(kind, raw);
+        const reason = isSuspicious(item);
+        if (reason) found.push({ a, item, reason });
+      }
+
+  const result = ctx.withTx(tx => {
+    const states = countByState(customers);
+    for (const [st, n] of states) setStateRecords(tx, incidentId, st, BigInt(n));
+    const total = BigInt(customers.length);
+    const agg = [...tx.db.scopeItem.incidentId.filter(incidentId)].find(sc => sc.assetRef === 'nessie-customers');
+    if (!agg || agg.recordsCount !== total || agg.status !== 'exfiltrated')
+      setScope(tx, { incidentId, assetType: 'customer', assetRef: 'nessie-customers', label: 'Customer records (Nessie, First Avon Bank)', status: 'exfiltrated', recordsCount: total });
+    const seen = new Set([...tx.db.fraudAlert.incidentId.filter(incidentId)].map(f => f.transferRef));
+    let raised = 0;
+    for (const f of found) {
+      const ref = `${f.item.kind}:${f.item.ref}`;
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      const label = accountLabel(f.a);
+      setScope(tx, { incidentId, assetType: 'account', assetRef: f.a._id, label: `Account ${label} (${names.get(f.a.customer_id ?? '') || 'customer'})`, status: 'exfiltrated', recordsCount: 1n });
+      raiseAlert(tx, { incidentId, accountRef: label, transferRef: ref, amountCents: BigInt(Math.round(f.item.amount * 100)), reason: f.reason });
+      raised++;
+    }
+    const row = { incidentId, offset: next, total: accounts.length, at: tx.timestamp };
+    if (tx.db.nessieCursor.incidentId.find(incidentId)) tx.db.nessieCursor.incidentId.update(row);
+    else tx.db.nessieCursor.insert(row);
+    const from = accounts.length ? (offset % accounts.length) + 1 : 0;
+    timeline(tx, incidentId, 'auto', `Nessie import: ${customers.length} customers in ${states.size} states; checked ${toScan.length} accounts (batch from #${from} of ${accounts.length}); ${raised} new fraud alert(s)`);
+    execUpdate(tx, incidentId);
+    progress(tx, incidentId);
+    return { customers: customers.length, states: states.size, accounts: accounts.length, checked: toScan.length, from, raised };
+  });
+  return JSON.stringify(result);
+});
+
 // ---------- Incident advisor (Gemini, grounded): answers from the live record, proposes checked actions ----------
 const SCOPE_WORDS: Record<string, string> = {
   encrypted: 'locked by ransomware', exfiltrated: 'stolen', accessed: 'seen by attacker', unknown: 'not checked yet', clear: 'safe',
@@ -1304,6 +1403,9 @@ export const phaseAdvances = db.view({ name: 'phaseAdvances', public: true }, t.
 );
 export const signoffs = db.view({ name: 'signoffs', public: true }, t.array(signoff.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.signoff.iter()] : []
+);
+export const nessieCursors = db.view({ name: 'nessieCursors', public: true }, t.array(nessieCursor.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.nessieCursor.iter()] : []
 );
 export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
   roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []
