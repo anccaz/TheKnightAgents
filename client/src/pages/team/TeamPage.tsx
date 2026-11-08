@@ -52,7 +52,10 @@ export default function TeamPage() {
   const setRole = useReducer(reducers.setRole);
   const run = useRun();
   const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? 'Breach Room';
-  const events = [...log].sort((a, b) => (a.id < b.id ? 1 : -1));
+  const [action, setAction] = useState('all');
+  const sorted = [...log].sort((a, b) => (a.id < b.id ? 1 : -1));
+  const actions = [...new Set(sorted.map(e => e.action))];
+  const events = action === 'all' ? sorted : sorted.filter(e => e.action === action);
   const admin = me?.role === 'admin';
 
   return (
@@ -95,6 +98,17 @@ export default function TeamPage() {
           <ShieldCheck className="size-4" /> Security events
         </h2>
         <p className="mb-3 text-xs text-muted-foreground">Append-only record of who did what. Admins only.</p>
+        {sorted.length > 0 && (
+          <label className="mb-3 flex items-center gap-2 text-sm">
+            Show
+            <select aria-label="Filter security events" className={SELECT} value={action} onChange={e => setAction(e.target.value)}>
+              <option value="all">All events ({sorted.length})</option>
+              {actions.map(a => (
+                <option key={a} value={a}>{ACTION_LABEL[a] ?? a}</option>
+              ))}
+            </select>
+          </label>
+        )}
         {events.length === 0 && <p className="text-sm text-muted-foreground italic">Nothing recorded yet.</p>}
         <ol className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
           {events.map(e => (

@@ -7,7 +7,7 @@ import App from './App';
 import './index.css';
 
 const TOKEN_KEY = 'breach-room:auth-token';
-const uri = import.meta.env.VITE_SPACETIME_URI ?? 'ws://127.0.0.1:3010';
+const uri = import.meta.env.VITE_SPACETIME_URI ?? 'https://maincloud.spacetimedb.com';
 const dbName = import.meta.env.VITE_SPACETIME_DB ?? 'breach-room';
 
 function loadToken(): string | undefined {
