@@ -1,9 +1,9 @@
 ---
 name: breach-room-ui
-description: UI conventions for the Breach Room React client (client/). Use before building or changing any page, component, or SpacetimeDB hook usage in the frontend.
+description: UI conventions for the Knight Agent React client (client/). Use before building or changing any page, component, or SpacetimeDB hook usage in the frontend.
 ---
 
-# Breach Room UI conventions
+# Knight Agent UI conventions
 
 Winstead judges **ease of use under stress** almost as heavily as security. The user is a panicked responder at 2 AM who never read a tutorial.
 

@@ -1,6 +1,6 @@
 ---
 name: nessie-api
-description: How Breach Room uses Capital One's Nessie mock-banking API (seeding customers/accounts/withdrawals/bills, importing them into an incident for the notice chart, scope and fraud alerts). Use when writing the seed script, the importer, or fraud detection.
+description: How Knight Agent uses Capital One's Nessie mock-banking API (seeding customers/accounts/withdrawals/bills, importing them into an incident for the notice chart, scope and fraud alerts). Use when writing the seed script, the importer, or fraud detection.
 ---
 
 # Nessie (Capital One hackathon API)
@@ -22,9 +22,9 @@ Verified from https://nessieisreal.com/docs.
 - "None found" lists come back as 404; treat as empty.
 - Amounts are dollars (numbers). Convert to cents (`toCents`) before calling reducers.
 
-## How Breach Room uses it
-1. `scripts/seed-nessie.mjs [--reset] [--count N]` creates "First Avon Bank": 260 fake customers across TX/CA/FL/NY/OK with accounts, withdrawals and bills, plus 6 planted fraud items (large withdrawals and new-payee bills, 2-4 AM) and 5 clean "live target" accounts. Writes `scripts/seed-output.json`. `--plant` adds one live fraud withdrawal for the demo.
-2. `scripts/import-nessie.mjs --incident <id> [--server maincloud] [--watch]` pushes it into an incident through `spacetime call`: `set_state_impact` per state (fills the notice chart), one aggregate customer scope item (starts legal clocks), account scope items + `raise_fraud_alert` for suspicious activity (>= $10,000 auto-freezes server-side). Progress is kept in `scripts/import-state.json` so reruns don't duplicate.
+## How Knight Agent uses it
+1. `scripts/seed-nessie.mjs [--reset] [--count N]` creates "First Avon Bank": 260 fake customers across TX/CA/FL/NY/OK with accounts, withdrawals and bills, plus 6 planted fraud items (3 withdrawals >= $10k that auto-freeze, 3 new-payee bills $5.5-9.5k that wait for a decision; all 2-4 AM, on accounts funded to cover them) and 5 clean "live target" accounts. Writes `scripts/seed-output.json`. `--plant` adds one live fraud withdrawal for the demo.
+2. `scripts/import-nessie.mjs --incident <id> [--server maincloud] [--watch]` pushes it into an incident through `spacetime call`: `set_state_impact` per state (fills the notice chart), one aggregate customer scope item (starts legal clocks), account scope items + `raise_fraud_alert` for suspicious activity (>= $10,000 auto-freezes server-side). Progress is kept in `scripts/import-state.json` per server/db/incident so reruns don't duplicate; `--fresh` forgets it (e.g. after wiping a local database).
 3. The CLI identity must be a member (`incident_lead` or `responder`); an admin adds it by ID in Team.
 
 ## Rules

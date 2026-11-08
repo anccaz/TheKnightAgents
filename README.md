@@ -1,4 +1,4 @@
-# TheKnightAgents · Breach Room
+# TheKnightAgents · Knight Agent
 
 An out-of-band, real-time **cyber incident command center** for a bank's response team ("First Avon Bank" in the demo). It keeps the incident record, what data was hit, legal notice deadlines, fraud decisions and team chat in one place, and it runs entirely outside the compromised network, so it still works when the attacker owns email and Slack.
 

@@ -90,7 +90,7 @@ export default function FeedPage() {
     channels.find(c => c.id === selected && allowed(c)) ??
     channels.find(c => c.name === 'general') ??
     channels.find(allowed);
-  const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? 'Breach Room';
+  const nameOf = (hex: string) => users.find(u => u.identity.toHexString() === hex)?.name ?? 'Knight Agent';
 
   const items: Item[] = [];
   if (incident) {

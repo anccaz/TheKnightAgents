@@ -1,4 +1,4 @@
-# Breach Room: Bank Breach Command Center
+# Knight Agent: Bank Breach Command Center
 
 HackUTD 2026 · Zero Day
 
@@ -96,7 +96,7 @@ React (Vite + TS) ──subscribe/call reducers──▶ SpacetimeDB module (TS)
 
 ## Demo script (3 min)
 
-1. **0:00** "It's 2 AM. Ransomware just hit First Avon Bank. Email and Slack are compromised." Open Breach Room on a laptop that's off-network.
+1. **0:00** "It's 2 AM. Ransomware just hit First Avon Bank. Email and Slack are compromised." Open Knight Agent on a laptop that's off-network.
 2. **0:20** Admin adds the legal lead by ID → they appear live with a restricted view.
 3. **0:40** Lead declares the incident and logs IOCs → timeline updates on both screens instantly *(Spacetime)*.
 4. **1:10** Responder marks the core-banking DB `exfiltrated` → scope board pulls affected customers from **Nessie**, counter jumps, **legal clocks start**.

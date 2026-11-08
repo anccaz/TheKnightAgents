@@ -4,7 +4,7 @@ import { useReducer, useTable } from 'spacetimedb/react';
 import { Check, CircleHelp, Download, Eye, Lock, Play, ShieldCheck, Snowflake, Square, ThumbsUp, Zap, type LucideIcon } from 'lucide-react';
 import { reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
-import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SCOPE_STATUSES, SEVERITIES, SeverityChip, WRITERS, can, useCurrentIncident, useMe } from '@/components/shared';
+import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SCOPE_STATUSES, SEVERITIES, SeverityChip, WRITERS, can, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -235,7 +235,7 @@ function IncidentRecord({ incident }: { incident: Incident }) {
   const [users] = useTable(tables.members);
   const [events] = useTable(tables.timelineEvents);
   const [scope] = useTable(tables.scopeItems);
-  const by = users.find(u => u.identity.isEqual(incident.createdBy))?.name ?? 'Breach Room';
+  const by = users.find(u => u.identity.isEqual(incident.createdBy))?.name ?? 'Knight Agent';
   const mine = events.filter(e => e.incidentId === incident.id).sort((a, b) => (a.id < b.id ? 1 : -1));
   const iocs = mine.filter(e => e.kind === 'ioc').slice(0, 5);
   const actions = mine.filter(e => e.kind === 'action' || e.kind === 'auto').slice(0, 5);
@@ -263,6 +263,7 @@ function IncidentRecord({ incident }: { incident: Incident }) {
   return (
     <Panel title="Incident record">
       <dl className="flex flex-col gap-2 text-sm">
+        {row('Incident ID', <span className="font-mono">{incidentCode(incident)}</span>)}
         {row('Type', kindLabel(incident.kind))}
         {row('Severity', <SeverityChip severity={incident.severity} />)}
         {row('Status', PHASE_LABEL[incident.phase] ?? incident.phase)}

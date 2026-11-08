@@ -45,6 +45,10 @@ export const WRITERS = ['admin', 'incident_lead', 'responder'];
 export const PRIVILEGED = ['admin', 'incident_lead', 'legal'];
 export const can = (me: { role: string } | undefined, roles: string[]) => !!me && roles.includes(me.role);
 
+/** Human-readable case number, e.g. INC-2026-0008 (year detected + incident id). */
+export const incidentCode = (inc: { id: bigint; detectedAt: { toDate(): Date } }) =>
+  `INC-${inc.detectedAt.toDate().getFullYear()}-${inc.id.toString().padStart(4, '0')}`;
+
 // shortcut: "current incident" = newest incident; add an incident picker if two run at once.
 export function useCurrentIncident() {
   const [incidents] = useTable(tables.incidents);
