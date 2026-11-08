@@ -2,7 +2,7 @@
 import { useState, type ReactNode } from 'react';
 import type { Identity } from 'spacetimedb';
 import { useProcedure, useReducer, useTable } from 'spacetimedb/react';
-import { Check, ShieldCheck } from 'lucide-react';
+import { Check, Download, ShieldCheck, Zap } from 'lucide-react';
 import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import { LEADS, PHASES, PHASE_LABEL, SIGNOFF_TASKS, WRITERS, can, useCurrentIncident, useMe } from '@/components/shared';
@@ -45,6 +45,7 @@ export function AgentPrompts({ incident }: { incident: Incident }) {
   const toggleTask = useReducer(reducers.toggleTask);
   const signOffTask = useReducer(reducers.signOffTask);
   const setPhase = useReducer(reducers.setPhase);
+  const runAutopilot = useReducer(reducers.runAutopilot);
   const importFromNessie = useProcedure(procedures.importFromNessie);
   const run = useRun();
   const [busy, setBusy] = useState(false);
@@ -64,7 +65,39 @@ export function AgentPrompts({ incident }: { incident: Incident }) {
       </li>
     );
 
-  if (lead && !cursors.some(c => c.incidentId === incident.id))
+  const cur = cursors.find(c => c.incidentId === incident.id);
+  const checkNext = () => {
+    setBusy(true);
+    run(importFromNessie({ incidentId: incident.id }).finally(() => setBusy(false)), 'Nessie import finished');
+  };
+  if (lead && cur)
+    out.push(
+      <AgentBubble
+        key="nessie"
+        live
+        actions={
+          <>
+            <Button size="sm" variant="outline" className="rounded-full" disabled={busy || cur.checked >= cur.total} onClick={checkNext}>
+              <Download /> {busy ? 'Reading Nessie…' : 'Check next accounts'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-full"
+              onClick={() =>
+                window.confirm('Run autopilot on this Nessie data? The robot responder works through every phase on its own (drills only).') &&
+                run(runAutopilot({ incidentId: incident.id }), 'Autopilot running on Nessie data')
+              }
+            >
+              <Zap /> Run autopilot on this data
+            </Button>
+          </>
+        }
+      >
+        Nessie: I've checked <b>{cur.checked} of {cur.total}</b> bank accounts so far. Want me to scan the next batch, or run the whole response on autopilot with this data?
+      </AgentBubble>
+    );
+  if (lead && !cur)
     out.push(
       <AgentBubble
         key="nessie"
@@ -74,10 +107,7 @@ export function AgentPrompts({ incident }: { incident: Incident }) {
             size="sm"
             className={PRIMARY}
             disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              run(importFromNessie({ incidentId: incident.id }).finally(() => setBusy(false)), 'Nessie import finished');
-            }}
+            onClick={checkNext}
           >
             {busy ? 'Reading Nessie…' : 'Import from Nessie'}
           </Button>
@@ -178,7 +208,8 @@ export function NessieCard({ incidentId, at }: { incidentId: bigint; at: Date })
   const customers = scope.find(s => s.incidentId === incidentId && s.assetRef === 'nessie-customers')?.recordsCount ?? 0n;
   const byState = states.filter(s => s.incidentId === incidentId && s.records > 0n).sort((a, b) => Number(b.records - a.records));
   const max = byState[0]?.records ?? 1n;
-  const flagged = alerts.filter(a => a.incidentId === incidentId && /^(withdrawal|bill):/.test(a.transferRef)).length;
+  const suspicious = alerts.filter(a => a.incidentId === incidentId && /^(withdrawal|bill):/.test(a.transferRef)).sort((a, b) => Number(b.amountCents - a.amountCents));
+  const flagged = suspicious.length;
   return (
     <AgentBubble>
       <div className="mb-2 text-xs text-muted-foreground">Bank data from Nessie (Capital One) · {time(at)}</div>
@@ -207,6 +238,18 @@ export function NessieCard({ incidentId, at }: { incidentId: bigint; at: Date })
                 <span className="block h-2 rounded-full bg-gradient-to-r from-sky-400 to-violet-500" style={{ width: `${Math.max(4, Number((s.records * 100n) / max))}%` }} />
               </span>
               <span className="text-right font-mono text-muted-foreground">{s.records.toLocaleString()}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {flagged > 0 && (
+        <ul className="mt-3 flex flex-col gap-1 border-t border-white/10 pt-2 text-xs">
+          {suspicious.slice(0, 4).map(a => (
+            <li key={`${a.id}`} className="flex flex-wrap items-baseline gap-x-2">
+              <b className="font-mono text-amber-300">${(a.amountCents / 100n).toLocaleString()}</b>
+              <code className="font-mono">{a.accountRef}</code>
+              <span className="min-w-0 flex-1 text-muted-foreground">{a.reason}</span>
+              <span className={a.status === 'frozen' ? 'text-sky-300' : 'text-muted-foreground'}>{a.status === 'frozen' ? '❄ frozen' : a.status === 'dismissed' ? 'fine' : 'open'}</span>
             </li>
           ))}
         </ul>
