@@ -50,6 +50,10 @@ export default function IncidentPage() {
   const [showSummary, setShowSummary] = useState(false);
   if (!incident) return <DeclareForm />;
   const summary = incident.phase === 'post_incident' || showSummary;
+  // Sections appear as the incident moves on, so each phase only shows what it needs.
+  const at = PHASES.indexOf(incident.phase as (typeof PHASES)[number]);
+  const reached = (p: (typeof PHASES)[number]) => at >= PHASES.indexOf(p);
+  const upcoming = ([['analyze', 'What was hit'], ['contain', 'Fraud decisions']] as const).filter(([p]) => !reached(p));
   return (
     <div className="flex flex-col gap-6">
       <section className="glass flex flex-col gap-4 p-5">
@@ -75,8 +79,13 @@ export default function IncidentPage() {
         <IncidentRecord incident={incident} />
         <Tasks incidentId={incident.id} phase={incident.phase} />
       </div>
-      <Scope incidentId={incident.id} />
-      <Fraud incidentId={incident.id} phase={incident.phase} />
+      {reached('analyze') && <Scope incidentId={incident.id} />}
+      {reached('contain') && <Fraud incidentId={incident.id} phase={incident.phase} />}
+      {upcoming.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Coming up: {upcoming.map(([p, what]) => `${what} opens in ${PHASE_LABEL[p]}`).join(' · ')}
+        </p>
+      )}
     </div>
   );
 }
