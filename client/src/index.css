@@ -1,14 +1,18 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import "@fontsource/oxanium/500.css";
+@import "@fontsource/oxanium/700.css";
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/700.css";
 @import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-heading: 'Oxanium', sans-serif;
+    --font-sans: 'Space Grotesk', sans-serif;
     --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
     --color-neon: var(--neon);
     --color-magenta: var(--magenta);
@@ -95,9 +99,9 @@
 .dark {
     /* Cyberpunk palette: #1e3fd8 #82a6e0 #38bcf6 #ca0153 #580534 */
     --background: #04050d;
-    --foreground: #e6ecff;
+    --foreground: #ffffff;
     --card: rgb(8 12 32 / 0.42);
-    --card-foreground: #e6ecff;
+    --card-foreground: #ffffff;
     --popover: #0a0f26;
     --popover-foreground: #e6ecff;
     --primary: #38bcf6;
@@ -137,6 +141,9 @@
     @apply text-foreground;
     background: transparent; /* the ASCII background shows through */
     }
+  h1, h2, h3 {
+    @apply font-heading text-white;
+  }
   html {
     @apply font-sans;
     background-color: #04050d;

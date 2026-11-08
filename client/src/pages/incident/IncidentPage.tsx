@@ -38,7 +38,7 @@ export default function IncidentPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="font-mono text-xs tracking-[0.3em] text-magenta uppercase magenta-text">Active incident</p>
-            <h1 className="text-2xl font-bold break-words text-neon neon-text sm:text-3xl">{incident.title}</h1>
+            <h1 className="text-2xl font-bold break-words text-white neon-text sm:text-3xl">{incident.title}</h1>
           </div>
           <DrillControls />
         </div>
@@ -57,7 +57,7 @@ export default function IncidentPage() {
 function Panel({ title, children, className }: { title: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={cn('glass flex flex-col gap-4 p-5', className)}>
-      <h2 className="font-mono text-sm font-bold tracking-[0.2em] text-neon uppercase neon-text">{title}</h2>
+      <h2 className="font-heading text-sm font-bold tracking-[0.2em] text-white uppercase neon-text">{title}</h2>
       {children}
     </section>
   );
@@ -96,7 +96,7 @@ function DeclareForm() {
   };
   return (
     <form className="glass mx-auto flex max-w-xl flex-col gap-4 p-6" onSubmit={submit}>
-      <h1 className="text-2xl font-bold text-neon neon-text">No incident yet</h1>
+      <h1 className="text-2xl font-bold text-white neon-text">No incident yet</h1>
       <p className="text-muted-foreground">Something wrong? Declare an incident so the whole team sees it.</p>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="inc-title">What is happening?</Label>

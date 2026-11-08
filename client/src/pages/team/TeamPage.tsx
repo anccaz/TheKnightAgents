@@ -27,7 +27,7 @@ export function JoinScreen() {
   const run = useRun();
   return (
     <section className="glass mx-auto mt-10 max-w-xl space-y-4 p-6">
-      <h1 className="font-mono text-xl tracking-[0.2em] text-neon uppercase neon-text">Join the response team</h1>
+      <h1 className="font-heading text-xl tracking-[0.2em] text-white uppercase neon-text">Join the response team</h1>
       <p className="text-muted-foreground">
         Send this ID to your admin over a channel you trust (phone, in person). They add you and this page opens by itself.
       </p>
@@ -60,7 +60,7 @@ export default function TeamPage() {
       <div className="space-y-6">
         {admin && <AddMemberForm />}
         <section className="glass p-4">
-          <h2 className="mb-3 font-mono text-sm tracking-[0.2em] text-neon uppercase neon-text">Members ({users.length})</h2>
+          <h2 className="mb-3 font-heading text-sm tracking-[0.2em] text-white uppercase neon-text">Members ({users.length})</h2>
           <ul className="divide-y divide-border">
             {users.map(u => (
               <li key={u.identity.toHexString()} className="flex flex-wrap items-center gap-3 py-2">
@@ -91,7 +91,7 @@ export default function TeamPage() {
       </div>
 
       <section className="glass p-4">
-        <h2 className="mb-1 flex items-center gap-2 font-mono text-sm tracking-[0.2em] text-magenta uppercase magenta-text">
+        <h2 className="mb-1 flex items-center gap-2 font-heading text-sm tracking-[0.2em] text-white uppercase magenta-text">
           <ShieldCheck className="size-4" /> Security events
         </h2>
         <p className="mb-3 text-xs text-muted-foreground">Append-only record of who did what. Admins only.</p>
@@ -136,7 +136,7 @@ function AddMemberForm() {
 
   return (
     <form className="glass space-y-3 p-4" onSubmit={submit}>
-      <h2 className="flex items-center gap-2 font-mono text-sm tracking-[0.2em] text-neon uppercase neon-text">
+      <h2 className="flex items-center gap-2 font-heading text-sm tracking-[0.2em] text-white uppercase neon-text">
         <UserPlus className="size-4" /> Add someone
       </h2>
       <label className="block space-y-1 text-sm font-medium">

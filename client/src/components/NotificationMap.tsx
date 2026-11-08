@@ -66,7 +66,7 @@ export default function NotificationMap({ incidentId }: { incidentId: bigint }) 
   return (
     <section aria-label="Notification map">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-mono text-sm tracking-[0.3em] text-neon uppercase neon-text">Who must we tell</h2>
+        <h2 className="font-heading text-sm tracking-[0.3em] text-white uppercase neon-text">Who must we tell</h2>
         <span className="text-sm text-muted-foreground">
           {total ? (
             <>

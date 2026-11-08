@@ -148,7 +148,7 @@ export default function FeedPage() {
       {/* Deadlines */}
       <div className="glass p-3">
         <div className="mb-2 flex items-center gap-2">
-          <h2 className="neon-text font-mono text-sm font-bold tracking-widest text-neon uppercase">Deadlines</h2>
+          <h2 className="neon-text font-heading text-sm font-bold tracking-widest text-white uppercase">Deadlines</h2>
           <Button size="xs" variant="outline" className="ml-auto" aria-expanded={showForm} onClick={() => setShowForm(s => !s)}>
             {showForm ? <ChevronDown /> : <Plus />} Add a deadline
           </Button>

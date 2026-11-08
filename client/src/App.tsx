@@ -66,7 +66,7 @@ export default function App() {
       <div className="relative z-10">
       <header className="sticky top-0 z-20 border-b border-border bg-background/35 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <span className="font-mono text-lg font-bold tracking-[0.25em] text-neon neon-text">
+          <span className="font-heading text-xl font-bold tracking-[0.25em] text-white neon-text">
             BREACH<span className="text-magenta magenta-text">//</span>ROOM
           </span>
           {incident ? (
