@@ -1,199 +1,230 @@
 # Agent prompts: Breach Room
 
-Copy **Shared context** plus **one lane's prompt** into a fresh Claude / agent chat opened in this repo. Each lane prompt is self-contained.
+Paste **Shared context** plus **one lane's prompt** into a fresh Claude / agent chat opened in this repo. Each lane prompt is self-contained and lists only what's **still left**. Everything finished is in the shared context.
 
 Deadlines: initial Devpost **11 PM Sat** · feature freeze **8 AM Sun** · final Devpost **12 PM Sun**.
+Branches: `main` (shared, deployable), lane branches (`lane-b`, `annie` for Lane A, ...). Merge to `main` when your lane's work is tested.
 
 ---
 
 ## Shared context (paste this first, every time)
 
 ```text
-You are working on "Breach Room" (repo: TheKnightAgents), a HackUTD 2026 project: an out-of-band,
-real-time cyber-incident command center for a bank's response team. It runs outside the bank's network
-so the team can coordinate when attackers own email/Slack.
+=== PROJECT ===
+"Breach Room" (repo github.com/anccaz/TheKnightAgents, public) - HackUTD 2026.
+An out-of-band, real-time cyber-incident command center for a bank's response team. It runs outside the bank's
+network so the team can coordinate when attackers own email/Slack. Demo bank: "First Avon Bank".
 
-Tracks we compete in (judges score against these):
-- Winstead PC (law firm): Cyber Incident Response Dashboard. Required: secure & isolated, access control,
-  incident documentation to standards with real-time status, scope of compromised data and its status
-  (locked/ransomware, exfiltrated...), real-time comms. Judged on SECURITY (assume attacker owns all internal
-  systems) and EASE OF USE under stress (no tutorials), plus creativity.
-- Spacetime: SpacetimeDB must power the core app (it does: all logic is reducers, all screens are live subscriptions).
-  Public GitHub repo required, so NEVER commit secrets.
-- Capital One: Best Use of Nessie (mock banking API) - customers/accounts/withdrawals/bills drive our data.
+Tracks (judges score against these):
+- Winstead PC (law firm): Cyber Incident Response Dashboard. Required: secure & isolated, access control, incident
+  documentation to standards with real-time status, scope of compromised data + its status (locked/ransomware,
+  exfiltrated...), real-time comms. Judged on SECURITY (assume attacker owns all internal systems), EASE OF USE under
+  stress (no tutorials), creativity.
+- Spacetime: SpacetimeDB must power the core app (it does: every rule is a reducer, every screen a live subscription,
+  the drill is a scheduled reducer). Public source required -> NEVER commit secrets.
+- Capital One: Best Use of Nessie (mock banking API).
 - MLH extras: Gemini API, GoDaddy domain (code MLHUTD84), DEV writing challenge.
 
-Stack and layout:
-- spacetimedb/src/index.ts  = SpacetimeDB v2 TypeScript module (the data contract). Tables are PRIVATE;
-  clients read ONLY through views at the bottom (members, incidents, timelineEvents, scopeItems, tasks,
-  channels, messages, legalClocks, fraudAlerts, stateImpacts, auditEntries). Views return [] to non-members.
-  Shared helpers hold logic: newIncident, setScope, raiseAlert, startClock, setStateRecords, addGuidedTasks,
-  audit, timeline, requireRole, requireIncident. Auto-rules: data marked 'exfiltrated' starts LEGAL_RULES clocks;
-  fraud alerts >= $10,000 (AUTO_FREEZE_CENTS) auto-freeze; phase change creates GUIDED tasks; startDrill runs
-  a scheduled scripted attack (DRILL) via the drillStep scheduled table.
-- spacetimedb/test/*.test.ts = vitest tests using spacetimedb/server/test-utils (run: cd spacetimedb && npm test).
-- client/ = Vite + React 18 + TypeScript, Tailwind v4 + shadcn "base-nova" (built on @base-ui/react, NOT Radix:
-  read src/components/ui/* props before using). Import with "@/". Icons: lucide-react.
-  3 pages only: src/pages/incident (record, phases, tasks, what was hit, fraud), src/pages/feed (notice priority chart,
-  deadlines, merged chat/timeline/security feed), src/pages/team (join by ID, add member, roles, security events).
-  Shell: src/App.tsx. Notice priority chart: src/components/NotifyPriorityChart.tsx (bubble chart: x = time left, y = people affected, color = customers vs authorities). State rules:
-  src/lib/notifyRules.ts. Background: React Bits GradientASCII (src/components/GradientASCII.jsx) - do not
-  re-add loseContext() in its cleanup (breaks under React StrictMode: white screen).
-- scripts/ = Nessie seed + fraud rule (node --test scripts/*.test.mjs).
-- Generated client bindings: client/src/module_bindings (never hand-edit; regenerate).
+=== ARCHITECTURE ===
+No app server. Browser <-> SpacetimeDB directly (websocket subscriptions + reducer calls).
 
-UI rules (from .claude/skills/breach-room-ui): stressed user, plain words, one obvious action, status readable
-without color (text/icon), 3 colors only: cyan (primary), magenta (danger), white/gray (neutral). Solid panels,
-no glows except the map, no emojis. Titles: Oxanium (font-heading), body: Space Grotesk.
+spacetimedb/src/index.ts  (SpacetimeDB v2.14 TypeScript module = the data contract)
+- Tables (ALL PRIVATE): owner, user, incident, timelineEvent, scopeItem, task, channel, message, legalClock,
+  fraudAlert, auditLog, stateImpact (stolen records per US state), notifyStatus (per-notice not_started/drafted/sent),
+  drillStep (scheduled table).
+- Views (the ONLY thing clients read; return [] to non-members): members, incidents, timelineEvents, scopeItems, tasks,
+  channels, messages (#legal hidden unless admin/incident_lead/legal), legalClocks, fraudAlerts, stateImpacts,
+  notifyStatuses, auditEntries (admin only).
+- Reducers: init (stores owner), onConnect/onDisconnect (online flag), addMember (admin or DB owner), setRole (blocks
+  removing last admin), createIncident, setPhase, addTimelineEvent, addTask, toggleTask, sendMessage, upsertScopeItem,
+  raiseFraudAlert, setFraudAlertStatus, startLegalClock, completeLegalClock, setStateImpact, setNotifyStatus,
+  startDrill, stopDrill, runDrillStep (scheduled; internal-only guard).
+- Shared helpers (logic lives here; reducers check roles then call them): requireRole, requireIncident, audit,
+  timeline, oneOf, newIncident, addGuidedTasks, startClock, autoLegalClocks, setScope, raiseAlert, setStateRecords.
+- Auto-rules: incident/phase change -> GUIDED tasks; scope status 'exfiltrated' -> LEGAL_RULES clocks (bank regulator 36h,
+  SEC 8-K, Texas AG at 250+, Texas customers); fraud alert >= $10,000 (AUTO_FREEZE_CENTS) -> auto-frozen + audit;
+  DRILL = scripted ~90 s attack (encryption alert, ransom note, data theft -> state impacts TX/CA/FL/NY/OK + clocks,
+  3 fraudulent transfers, online-banking access).
+- Roles: admin, incident_lead, responder, legal, exec_viewer. WRITERS = incident_lead, responder (+admin).
+- Tests: spacetimedb/test/roles.test.ts, automation.test.ts (vitest + spacetimedb/server/test-utils), 10 passing.
 
-Roles today: admin, incident_lead, responder, legal, exec_viewer. Server enforces with requireRole; the client
-hides controls via can(me, LEADS|WRITERS|PRIVILEGED) from src/components/shared.tsx.
+client/  (Vite + React 18 + TS, Tailwind v4 + shadcn "base-nova" on @base-ui/react - NOT Radix: read
+src/components/ui/* props first; import with "@/"; icons lucide-react)
+- src/App.tsx: shell, header (incident/phase/severity/online/connection), 3 tabs, full-screen React Bits
+  GradientASCII background (src/components/GradientASCII.jsx + .d.ts; do NOT re-add loseContext() in its cleanup -
+  React StrictMode remount -> white screen).
+- src/pages/incident/IncidentPage.tsx: declare form, drill buttons, 6-phase stepper, NIST-style incident record
+  (derived), "What do I do next?" tasks, What was hit (counters + table + add form), Fraud: needs a decision.
+- src/pages/feed/FeedPage.tsx: NotifyPriorityChart at top, Deadlines strip (countdowns, mark filed, add deadline),
+  merged feed (chat per channel + timeline + security events) with All/Chat/Auto/Security filters, composer
+  (message or "log as incident note").
+- src/pages/team/TeamPage.tsx: JoinScreen (copy your ID), Add member by ID, members + role dropdown, security events
+  with action filter.
+- src/components/NotifyPriorityChart.tsx: bubble chart "Who must we tell first" - each bubble = one notice owed
+  (state customers, state AG, federal regulator/SEC); x = time left (log days), y = people affected (log), size =
+  people, color customers #1f9ad8 / authorities #ff2d6f (palette validated for CVD/contrast); 1-week + Average
+  reference lines; dodged overlaps; hover tooltip; notice queue with status chips and Mark drafted / Mark sent /
+  Reopen (sent federal notice also completes its legal clock). Sent bubbles hollow, drafted dashed.
+- src/lib/notifyRules.ts: state rules (TX, CA, FL, NY + default) -> obligationsFor(state, records, since).
+- src/components/shared.tsx: useMe, useCurrentIncident (newest incident), can(), LEADS/WRITERS/PRIVILEGED, labels,
+  SeverityChip. src/components/Toast.tsx: useRun() - wrap every reducer call: run(promise, okText?).
+- Generated bindings: src/module_bindings (never hand-edit; `npm run generate` in spacetimedb/).
 
-Commands:
+scripts/: Nessie seed (seed-nessie.mjs - NEEDS FIXES, see Lane C), fraud rule lib.mjs + tests.
+docs/: plan.md (original plan), agent-prompts.md (this). .claude/skills/: spacetime-module, breach-room-ui, nessie-api.
+
+UI rules: stressed user, plain words, one obvious action, status readable without color (text/icon). 3 colors only:
+cyan (primary), magenta (danger), white/gray (neutral). Solid panels, no glows, no emojis. Titles Oxanium
+(font-heading, white), body Space Grotesk, labels/numbers font-mono.
+
+=== WHAT'S FINISHED ===
+- Secure access: join by identity (no invite codes), owner makes first admin via CLI, private tables + role views,
+  server-side role checks, last-admin guard, append-only audit log, Maincloud republished with the security fix.
+- Incident flow end to end, live across browsers; guided tasks; drill; auto legal clocks; auto-freeze.
+- Notice priority chart + per-notice drafted/sent status (audited).
+- Cyberpunk UI (3 pages), fonts, background, calmer 3-color theme.
+- Lane A's annie branch merged into lane-b and main. lane-b may be ahead of main (notice status) - check git log.
+
+=== COMMANDS ===
 - Module: cd spacetimedb && npm install && npx tsc --noEmit && npm test
 - Local server: spacetime start --listen-addr 127.0.0.1:3010 ; npm run publish:local ; npm run generate
-- Cloud: spacetime login ; npm run publish:cloud (db name "breach-room" on Maincloud)
-- First admin: open the app, copy "Your ID", then the publisher runs:
+- Cloud: spacetime login ; npm run publish:cloud   (db "breach-room" on Maincloud; add --delete-data if a schema
+  change is refused - demo data only)
+- First admin: open app, copy "Your ID", publisher runs:
   spacetime call [--server http://127.0.0.1:3010] breach-room add_member '{"__identity__":"0x<ID>"}' '"Name"' '"email"' '"admin"'
-  (CLI reducer names are snake_case.)
-- Client: cd client && npm install && npm run dev (client/.env: VITE_SPACETIME_URI, VITE_SPACETIME_DB; default is Maincloud)
+  (CLI reducer names are snake_case; client calls camelCase.)
+- Client: cd client && npm install && npm run dev. Default URI = Maincloud; client/.env can override
+  VITE_SPACETIME_URI (e.g. ws://127.0.0.1:3010) and VITE_SPACETIME_DB.
 
-Rules for you:
-- Load the matching skill in .claude/skills before editing (spacetime-module, breach-room-ui, nessie-api).
-- Stay in your lane's files. Only Lane A edits table definitions unless the lane prompt says otherwise; if you add
-  a table, add its view and a test.
-- Every write goes through a reducer that starts with requireRole; security actions call audit().
-- After module changes: npx tsc --noEmit, npm test, publish, npm run generate, then cd client && npx tsc --noEmit.
-- Exporting anything other than reducers/views/lifecycle hooks from the module breaks publish.
-- Keys (Nessie, Gemini) live only in .env (gitignored) or server-side code paths, never in client/ or git.
-- Commit messages: no Claude/Anthropic attribution or Co-Authored-By lines. Work on your lane branch; don't push
-  to main without the team agreeing.
+=== RULES FOR YOU ===
+- Load the matching skill in .claude/skills before editing.
+- Stay in your lane's files. New table => add its view + a test, and tell Lane A (they republish Maincloud).
+- Every write = reducer starting with requireRole; security-relevant actions call audit(); incident-visible ones timeline().
+- Only export reducers/views/lifecycle hooks from the module (anything else breaks publish).
+- After module changes: npx tsc --noEmit && npm test, publish, npm run generate, then cd client && npx tsc --noEmit.
+- Keys (Nessie, Gemini) only in .env (gitignored) or server-side paths; never in client/ or git.
+- Commit messages: no Claude/Anthropic attribution or Co-Authored-By lines.
 - Verify in the browser before saying something works.
 ```
 
 ---
 
-## Lane A: access, security, Maincloud
+## Lane A: access, security, Maincloud (owner: Annie)
+
+**Finished:** Maincloud publish, member bootstrap, role switching, audit filter (merged).
 
 ```text
-You own Lane A: access control, security hardening, and the shared Maincloud database.
-Files: spacetimedb/src/index.ts (tables, access reducers, views), spacetimedb/test/roles.test.ts,
-client/src/pages/team/TeamPage.tsx, README setup section.
+You own Lane A: security hardening and the shared Maincloud database.
+Files: spacetimedb/src/index.ts (tables/access/views), spacetimedb/test/roles.test.ts,
+client/src/pages/team/TeamPage.tsx, README setup section, docs/plan.md security notes.
 
-Tasks, in order:
-1. BLOCKER - Republish Maincloud from main: cd spacetimedb && spacetime login && npm run publish:cloud.
-   The live database runs an OLD module that still has bootstrap_admin (first visitor becomes admin).
-   If publish refuses because the schema changed, re-run with --delete-data (demo data only). Then make the
-   first admin with spacetime call ... add_member (see shared context) and add each teammate by their ID.
-   Done when: the app with default .env (Maincloud) shows the join screen for strangers and works for members.
-2. Tamper-evident audit chain: add a `hash` (string) and `prevHash` column to auditLog (or a new auditChain
-   table), compute hash = sha256(prevHash + at + actor + action + detail) inside audit(). Add a reducer-free
-   check: a view or client function that recomputes the chain and reports the first broken link. UI: a
-   "Verify record" button on Team > Security events showing "Record intact" or "Broken at event N".
-   Add a test that editing a row breaks verification. (SpacetimeDB modules have no Node crypto: implement a
-   small hash in TS or check what spacetimedb/server exposes; keep it deterministic.)
-3. Fix "0 online": members added while already connected stay offline until reload. Option: mark online in
-   addMember when the target currently has a live connection (track connections in a table updated by
-   clientConnected/clientDisconnected keyed by identity).
-4. Security pitch notes (3 bullets in docs/plan.md): out-of-band hosting, private tables + role views +
-   server-side checks, append-only verified audit trail, join by identity with no shared secrets.
-Out of scope: changing to 3 roles (team decided to skip), UI redesign.
+Still to do, in order:
+1. Republish Maincloud from the latest main (it now has the notifyStatus table and setNotifyStatus reducer):
+   cd spacetimedb && npm run publish:cloud (add --delete-data if refused), re-add members by ID, confirm the
+   Live Feed "Mark sent" works on Maincloud. Redo this after every backend merge.
+2. Tamper-evident audit chain: add prevHash + hash to auditLog (or a parallel auditChain table); in audit() compute
+   hash = H(prevHash + at + actor + action + detail) with a small deterministic TS hash (no Node crypto in modules).
+   Client: "Verify record" button on Team > Security events recomputing the chain -> "Record intact" or
+   "Broken at event N". Test: tampering a row breaks verification.
+3. "0 online" glitch: members added while already connected show offline until reload. Track live connections
+   (table keyed by identity, updated in onConnect/onDisconnect) and set online in addMember if connected.
+4. Security pitch bullets in docs/plan.md: out-of-band hosting; private tables + role-filtered views + server-side
+   checks; join by identity, no shared secrets; append-only, verifiable audit trail.
+Skip: reducing to 3 roles.
 ```
 
 ---
 
-## Lane B: incident, live feed, notice priority chart, demo
+## Lane B: incident, live feed, notice chart, demo (owner: Sameeraa)
+
+**Finished:** Incident page, Live Feed, Team page UI; drill + auto-rules; notice priority chart; per-notice drafted/sent; theme.
 
 ```text
-You own Lane B: the Incident page, the Live Feed page, the notice priority chart, and the demo.
-Files: client/src/pages/incident/IncidentPage.tsx, client/src/pages/feed/FeedPage.tsx,
-client/src/components/NotifyPriorityChart.tsx, README demo section, docs/demo-script.md (new).
-You may add the backend pieces for task 1 (coordinate with Lane A: tell them which table you added).
+You own Lane B: Incident page, Live Feed, the notice priority chart, and the demo.
+Files: client/src/pages/incident/*, client/src/pages/feed/*, client/src/components/NotifyPriorityChart.tsx,
+README demo section, docs/demo-script.md (new). Small backend additions OK (tell Lane A).
 
-Tasks, in order:
-1. Notification map status + gaps (Winstead "documentation" and creativity):
-   - Backend: table notifyStatus {id, incidentId index, state, who ('Customers'|'Attorney General'|'Credit bureaus'),
-     status ('not_started'|'drafted'|'sent'), updatedAt, updatedBy} + reducer setNotifyStatus (writers + legal),
-     view notifyStatuses, audit() on 'sent', timeline 'action' entry; test it.
-   - Rules: add credit-bureau obligation when a state has >= 1000 residents affected (Lane D confirms the threshold
-     per state in client/src/lib/notifyRules.ts).
-   - UI in NotifyPriorityChart's notice queue (right-hand list): each obligation shows status chip + buttons "Mark drafted" / "Mark sent"
-     (confirm once), sent ones show who/when. Header shows "N of M notices sent".
-   - Show "What was stolen" per incident (e.g. "Names + account numbers") from the scope items labels/types.
-2. Auto status update to #exec: in the module's setPhase (and when a drill step marks data stolen), post a message
-   in the incident's 'exec' channel like "Phase: Contain · 12,500 records stolen · 4 deadlines, next in 1d 11h ·
-   $42,750 frozen". Sender is ctx.sender. Add a test.
-3. README: replace outdated page names with the 3-page flow (Incident / Live Feed / Team), how to run the drill,
-   Maincloud vs local setup.
-4. docs/demo-script.md: a 3-minute script per sponsor (Winstead: security + ease of use + legal map;
-   Spacetime: "no server, every rule is a reducer, every screen is a live subscription, the drill is a scheduled
-   reducer"; Capital One: Nessie customers fill the notice chart, Nessie withdrawals/bills trigger fraud + auto-freeze).
-   Then record a backup screen video of the drill on Maincloud.
-Keep the UI rules (3 colors, no glows except map, no emojis, Oxanium titles).
+Still to do, in order:
+1. Auto status updates to #exec: in the module, after setPhase and after a drill step marks data stolen, post a
+   message in the incident's 'exec' channel: "Phase: Contain · 12,500 records stolen · N notices owed, M sent ·
+   next deadline in 1d 11h · $42,750 frozen". Build it in a helper (execUpdate) using existing tables; sender =
+   ctx.sender. Add a test.
+2. README refresh: 3-page flow (Incident / Live Feed / Team), how to run the drill, notice chart + Mark sent,
+   Maincloud vs local setup, first-admin command.
+3. docs/demo-script.md: 3-minute script per sponsor -
+   Winstead: join by ID (no passwords), roles, run drill, legal clocks start by themselves, "Who must we tell first"
+   chart, mark Texas AG drafted -> sent, audit log shows it.
+   Spacetime: "there is no server": every rule is a reducer, every screen a live subscription, the drill is a
+   scheduled reducer, views enforce who sees what.
+   Capital One: Nessie customers' states fill the notice chart, Nessie withdrawals/bills raise fraud alerts,
+   $10k+ auto-freezes (depends on Lane C importer).
+4. Record a backup screen video of the drill on Maincloud (two browsers side by side to show live sync).
+5. Merge lane-b -> main after each tested chunk; ask Lane A to republish Maincloud when the backend changed.
 ```
 
 ---
 
-## Lane C: Nessie (Capital One)
+## Lane C: Nessie / Capital One
+
+**Finished:** seed script draft + fraud rule with tests (endpoints were guessed and are partly wrong).
 
 ```text
 You own Lane C: Capital One Nessie integration.
-Files: scripts/ (seed-nessie.mjs, lib.mjs, tests, new importer), .claude/skills/nessie-api/SKILL.md.
-Nessie facts (verified from https://nessieisreal.com/docs):
-- Base URL https://prod-api.nessieisreal.com , auth ?key=YOUR_KEY (get the key by logging in with GitHub).
-- Create+list: customers (GET/POST /customers, /customers/{id}/accounts), accounts (GET /accounts),
-  deposits & withdrawals (GET/POST /accounts/{id}/deposits|withdrawals), bills (GET /customers/{id}/bills,
-  GET/POST /accounts/{id}/bills, PUT/DELETE /bills/{id}), merchants, loans.
-  Enterprise read-all: GET /enterprise/customers.
-- Transfers: create only via POST /accounts/{id}/transfers; read by GET /transfers/{id} (no list endpoint).
-- Purchases: only GET/PUT/DELETE /purchase/{id} documented (no create/list) - do not rely on them.
-- No reset endpoint and no customer delete; delete accounts/bills one by one. Dates have no time of day.
-- Bills can be cancelled (PUT status) - use this as a real "freeze" action.
+Files: scripts/ (seed-nessie.mjs, lib.mjs, tests, new import-nessie.mjs), .claude/skills/nessie-api/SKILL.md.
 
-Tasks, in order:
-1. Fix scripts/seed-nessie.mjs: base URL, --reset deletes accounts/bills individually, replace purchases with
-   withdrawals + bills (planted suspicious: large withdrawals and new-payee bills on a few accounts, 2-4 AM in the
-   description). Keep tests passing (node --test scripts/*.test.mjs). Update the nessie-api skill with the facts above.
-2. Importer scripts/import-nessie.mjs (Node 22, no deps): reads NESSIE_API_KEY from root .env; connects to
-   SpacetimeDB as a member (use the spacetimedb npm client SDK with a token for an identity an admin added, or
-   call reducers via `spacetime call`); for a given incident id:
-   - picks the compromised customers (e.g. those whose accounts were seeded as compromised, or a --percent),
-     groups them by address.state and calls set_state_impact(incidentId, state, count) -> lights up the map;
-   - calls upsert_scope_item for each compromised account (assetType 'account', assetRef Nessie _id,
-     status 'exfiltrated', recordsCount 1) or one aggregated row;
-   - scans withdrawals/bills of compromised accounts with lib.mjs rules and calls raise_fraud_alert
-     (amountCents = dollars*100) -> >= $10,000 auto-freezes server-side;
-   - optional --watch mode polling every 10 s for new withdrawals/bills (great live demo).
-   Add a short section to README: how to run it during the demo.
-Done when: running the importer against a live Nessie key lights states on the map and fills Fraud alerts.
+Nessie facts (verified from https://nessieisreal.com/docs):
+- Base URL https://prod-api.nessieisreal.com , auth ?key=YOUR_KEY (log in with GitHub on nessieisreal.com).
+- Create+list: customers (GET/POST /customers, GET/POST /customers/{id}/accounts), GET /accounts,
+  deposits & withdrawals (GET/POST /accounts/{id}/deposits|withdrawals), bills (GET /customers/{id}/bills,
+  GET/POST /accounts/{id}/bills, PUT/DELETE /bills/{id}), merchants, loans. Read-all: GET /enterprise/customers.
+- Transfers: create only (POST /accounts/{id}/transfers), read by GET /transfers/{id}; no list endpoint.
+- Purchases: only GET/PUT/DELETE /purchase/{id} documented - don't rely on them.
+- No reset endpoint, no customer delete; delete accounts/bills one by one. Dates have no time of day.
+- Bills can be cancelled (PUT status) - a real "freeze" action.
+
+Still to do, in order:
+1. Fix scripts/seed-nessie.mjs: base URL; --reset deletes accounts/bills individually; replace purchases with
+   withdrawals + bills; plant suspicious large withdrawals and new-payee bills ("2-4 AM" in description).
+   Keep node --test scripts/*.test.mjs green. Update the nessie-api skill with the facts above.
+2. scripts/import-nessie.mjs (Node 22, no deps; key from root .env): connect to SpacetimeDB as a member
+   (spacetimedb npm client SDK with a token for an identity an admin added, or shell out to `spacetime call`), and
+   for a given incident id:
+   - group compromised customers by address.state -> set_state_impact(incidentId, state, count)
+     (this fills the notice priority chart);
+   - upsert_scope_item for compromised accounts (assetType 'account', assetRef Nessie _id, status 'exfiltrated');
+   - scan withdrawals/bills of compromised accounts with lib.mjs rules -> raise_fraud_alert (amountCents =
+     dollars*100; >= $10,000 auto-freezes server-side);
+   - optional --watch: poll every 10 s for new withdrawals/bills (live demo moment).
+   Document how to run it in README.
+Done when: with a live key, the importer fills the chart and Fraud alerts on Maincloud.
 ```
 
 ---
 
 ## Lane D: legal, Gemini, submission
 
+**Finished:** nothing confirmed yet. Check with the team whether the initial Devpost was submitted.
+
 ```text
 You own Lane D: legal accuracy, the Gemini notice draft, and the submission.
-Files: client/src/lib/notifyRules.ts, LEGAL_RULES/GUIDED text in spacetimedb/src/index.ts (text/numbers only),
-Gemini integration (new), Devpost, slides, domain.
+Files: client/src/lib/notifyRules.ts, LEGAL_RULES / GUIDED text in spacetimedb/src/index.ts (numbers & labels only),
+new Gemini integration, Devpost, slides, domain/deploy.
 
-Tasks, in order:
-1. BLOCKER (11 PM): initial Devpost submission - title "Breach Room", one-liner, tracks: Winstead, Spacetime,
-   Capital One, MLH Gemini, MLH GoDaddy. Repo link github.com/anccaz/TheKnightAgents (public).
-2. Verify legal rules against current statutes and fix numbers/labels:
-   - client/src/lib/notifyRules.ts: TX (customers 60 days; AG at 250+ within 30 days), CA, FL, NY customer and
-     AG rules; add credit-bureau (consumer reporting agency) thresholds per state; DEFAULT for other states.
-   - spacetimedb/src/index.ts LEGAL_RULES: bank regulator 36h (OCC/Fed/FDIC computer-security incident rule),
-     SEC 8-K 4 business days (material incidents, public companies), Texas AG/customer clocks.
-   Cite sources in comments. Keep "verify before relying" wording in the UI.
-3. Gemini "Draft notice": per state in the notice queue (NotifyPriorityChart), a button that drafts the customer notice letter
-   using that state's affected count, what was stolen, incident date, and required content. The API key must
-   NOT be in the client: either a SpacetimeDB procedure making an HTTP call (check spacetimedb/server procedures
-   + http support in v2.14) with the key from module environment, or a tiny local Node endpoint the client calls.
-   Draft lands as a message in #legal (privileged) and sets that state's notifyStatus to 'drafted' (Lane B builds
-   notifyStatus). Human approves before "sent".
-4. Register the GoDaddy domain (code MLHUTD84) and point it at the deployed client (e.g. Vercel/Netlify static
-   build of client/ with VITE_SPACETIME_URI=Maincloud).
-5. Slides (5-6): problem, live drill, notice priority chart, security model, Spacetime architecture, Nessie data flow.
-   Then the DEV writing-challenge post after final submission (no sponsor-confidential challenge text).
+Still to do, in order:
+1. Initial Devpost (if not done): title "Breach Room", one-liner, tracks Winstead, Spacetime, Capital One,
+   MLH Gemini, MLH GoDaddy; repo github.com/anccaz/TheKnightAgents.
+2. Verify legal rules with sources (comments in code), keep "verify before relying" in UI:
+   - notifyRules.ts: TX (customers 60 days; AG 250+ within 30 days), CA, FL, NY customer + AG rules; add
+     credit-bureau (consumer reporting agency) thresholds per state (many states: 1,000+) - add 'Credit bureaus'
+     as a third obligation in obligationsFor so it shows in the notice chart (group 'authorities').
+   - LEGAL_RULES: bank regulator 36h (OCC/Fed/FDIC computer-security incident notification rule), SEC 8-K
+     4 business days (material incidents, public companies), Texas clocks.
+3. Gemini "Draft notice": in NotifyPriorityChart's notice queue, a "Draft with AI" button for the selected notice that
+   writes the letter (state, people affected, what was stolen, incident date, required content). The API key must
+   NOT reach the client: use a SpacetimeDB procedure with HTTP (check spacetimedb/server procedures + http in v2.14;
+   key from module environment) or a tiny local Node endpoint. Post the draft into #legal (privileged) and call
+   setNotifyStatus(..., 'drafted'). A human still clicks Mark sent.
+4. Deploy client (static build, VITE_SPACETIME_URI = Maincloud) and register the GoDaddy domain (MLHUTD84).
+5. Slides (5-6): problem, live drill, notice priority chart, security model, Spacetime architecture, Nessie flow.
+   DEV writing-challenge post after final submission (no sponsor-confidential challenge text).
 ```
