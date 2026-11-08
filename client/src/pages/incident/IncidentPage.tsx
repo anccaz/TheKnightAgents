@@ -385,8 +385,7 @@ function NessiePanel({ incidentId }: { incidentId: bigint }) {
   const flagged = alerts.filter(a => a.incidentId === incidentId && /^(withdrawal|bill):/.test(a.transferRef)).sort((a, b) => Number(b.amountCents - a.amountCents));
   const flaggedCents = flagged.reduce((n, a) => n + a.amountCents, 0n);
   const frozen = flagged.filter(a => a.status === 'frozen').length;
-  // The server checks accounts in order and wraps around; `offset` is where the next click starts (0 = a full pass is done).
-  const passPct = cur.total ? Math.round(((cur.offset === 0 ? cur.total : cur.offset) / cur.total) * 100) : 0;
+  const passPct = cur.total ? Math.round((cur.checked / cur.total) * 100) : 0;
   const stat = (label: string, value: string, sub?: string) => (
     <div className="rounded-lg border border-border bg-muted/30 p-3">
       <div className="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">{label}</div>
@@ -404,10 +403,10 @@ function NessiePanel({ incidentId }: { incidentId: bigint }) {
       </div>
       <div className="flex flex-col gap-1">
         <div className="flex justify-between text-xs text-muted-foreground">
-          <span>Accounts scanned this pass</span>
+          <span>Accounts scanned so far ({cur.checked} of {cur.total})</span>
           <span className="font-mono">{passPct}%</span>
         </div>
-        <div className="h-2 rounded-full bg-muted" role="progressbar" aria-valuenow={passPct} aria-valuemin={0} aria-valuemax={100} aria-label="Accounts scanned this pass">
+        <div className="h-2 rounded-full bg-muted" role="progressbar" aria-valuenow={passPct} aria-valuemin={0} aria-valuemax={100} aria-label="Accounts scanned so far">
           <div className="h-2 rounded-full bg-primary" style={{ width: `${passPct}%` }} />
         </div>
       </div>

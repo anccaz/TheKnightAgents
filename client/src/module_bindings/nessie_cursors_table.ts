@@ -15,4 +15,5 @@ export default __t.row({
   offset: __t.u32(),
   total: __t.u32(),
   at: __t.timestamp(),
+  checked: __t.u32(),
 });

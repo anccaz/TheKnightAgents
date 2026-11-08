@@ -221,6 +221,7 @@ const nessieCursor = table(
     offset: t.u32(),
     total: t.u32(), // accounts in Nessie at the last import
     at: t.timestamp(),
+    checked: t.u32().default(0), // accounts checked so far (capped at total); last + default so existing rows migrate
   }
 );
 
@@ -1026,11 +1027,12 @@ const NESSIE_BATCH = 20;
 const NESSIE_HOT_BALANCE = 75_000; // seed-nessie.mjs funds its live --plant targets to at least this
 
 export const importFromNessie = db.procedure({ incidentId: t.u64() }, t.string(), (ctx, { incidentId }) => {
-  const { offset, flagged } = ctx.withTx(tx => {
+  const { offset, checkedBefore, flagged } = ctx.withTx(tx => {
     requireRole(tx, ...WRITERS);
     requireIncident(tx, incidentId);
     const flaggedAccounts = new Set([...tx.db.scopeItem.incidentId.filter(incidentId)].filter(s => s.assetType === 'account').map(s => s.assetRef));
-    return { offset: tx.db.nessieCursor.incidentId.find(incidentId)?.offset ?? 0, flagged: flaggedAccounts };
+    const cur = tx.db.nessieCursor.incidentId.find(incidentId);
+    return { offset: cur?.offset ?? 0, checkedBefore: cur?.checked ?? 0, flagged: flaggedAccounts };
   });
   let key: string | undefined;
   try {
@@ -1092,7 +1094,7 @@ export const importFromNessie = db.procedure({ incidentId: t.u64() }, t.string()
       raiseAlert(tx, { incidentId, accountRef: label, transferRef: ref, amountCents: BigInt(Math.round(f.item.amount * 100)), reason: f.reason });
       raised++;
     }
-    const row = { incidentId, offset: next, total: accounts.length, at: tx.timestamp };
+    const row = { incidentId, offset: next, total: accounts.length, at: tx.timestamp, checked: Math.min(accounts.length, checkedBefore + picked.length) };
     if (tx.db.nessieCursor.incidentId.find(incidentId)) tx.db.nessieCursor.incidentId.update(row);
     else tx.db.nessieCursor.insert(row);
     const from = accounts.length ? (offset % accounts.length) + 1 : 0;
