@@ -514,6 +514,7 @@ const AUTO_TASKS: Record<string, (ctx: Ctx, id: bigint) => boolean> = {
 const ADVANCE_SEC = 30;
 const AUTOPILOT_ADVANCE_SEC = 3;
 const isAutopilot = (title: string) => title.startsWith('AUTOPILOT');
+const autopilotOn = (ctx: Ctx, incidentId: bigint) => [...ctx.db.autopilotStep.iter()].some(r => r.incidentId === incidentId);
 const nextPhase = (phase: string) => PHASES[PHASES.indexOf(phase as (typeof PHASES)[number]) + 1];
 
 function cancelAdvance(ctx: Ctx, incidentId: bigint, note?: string) {
@@ -540,7 +541,7 @@ function progress(ctx: Ctx, incidentId: bigint) {
     return;
   }
   if (pending.length || ctx.db.phaseHold.incidentId.find(incidentId)?.phase === inc.phase) return;
-  const secs = isAutopilot(inc.title) ? AUTOPILOT_ADVANCE_SEC : ADVANCE_SEC;
+  const secs = isAutopilot(inc.title) || autopilotOn(ctx, incidentId) ? AUTOPILOT_ADVANCE_SEC : ADVANCE_SEC;
   const at = new Timestamp(ctx.timestamp.microsSinceUnixEpoch + BigInt(secs) * 1_000_000n);
   ctx.db.phaseAdvance.insert({ scheduledId: 0n, scheduledAt: ScheduleAt.time(at.microsSinceUnixEpoch), incidentId, fromPhase: inc.phase, toPhase: to, at });
   timeline(ctx, incidentId, 'auto', `All ${PHASE_LABELS[inc.phase]} tasks done: moving to ${PHASE_LABELS[to]} in ${secs} s unless the lead stays`);
@@ -1350,13 +1351,36 @@ export const runAutopilotStep = db.reducer({ onSchedule: autopilotStep }, { row:
       ctx.db.legalClock.id.update({ ...c, done: true });
       audit(ctx, 'complete_legal_clock', c.label);
     }
-  } // other verifiable tasks wait for the attack script to produce their evidence
+  } // other verifiable tasks wait for the attack script (or imported data) to produce their evidence
+  scheduleAutopilot(ctx, id, row.tick + 1); // before progress, so the phase countdown knows autopilot is on
   progress(ctx, id);
   const after = ctx.db.incident.id.find(id)!;
   const finished =
     after.phase === 'post_incident' && [...ctx.db.task.incidentId.filter(id)].filter(t2 => t2.phase === after.phase).every(t2 => t2.done);
-  if (finished) timeline(ctx, id, 'note', 'Autopilot drill complete: every phase done.');
-  else scheduleAutopilot(ctx, id, row.tick + 1);
+  if (finished) {
+    for (const r of [...ctx.db.autopilotStep.iter()].filter(r => r.incidentId === id && r.scheduledId !== row.scheduledId))
+      ctx.db.autopilotStep.scheduledId.delete(r.scheduledId);
+    timeline(ctx, id, 'note', 'Autopilot drill complete: every phase done.');
+  }
+});
+
+/**
+ * Autopilot on an EXISTING incident (e.g. one filled by Import from Nessie): no scripted attack, the robot responder
+ * works through every phase using the data already there. Real incidents need real people; this is for drills.
+ */
+export const runAutopilot = db.reducer({ incidentId: t.u64() }, (ctx, { incidentId }) => {
+  const me = requireRole(ctx, 'incident_lead');
+  const inc = requireIncident(ctx, incidentId);
+  if (inc.phase === 'post_incident') throw new SenderError('This incident is already finished: start a new one');
+  if (autopilotOn(ctx, incidentId)) throw new SenderError('Autopilot is already running on this incident');
+  if (![...ctx.db.scopeItem.incidentId.filter(incidentId)].length)
+    throw new SenderError('Nothing to respond to yet: import from Nessie (or add what was hit) first');
+  if (ctx.db.phaseHold.incidentId.find(incidentId)) ctx.db.phaseHold.incidentId.delete(incidentId); // a "Stay here" would stall it
+  const alerts = [...ctx.db.fraudAlert.incidentId.filter(incidentId)].length;
+  timeline(ctx, incidentId, 'note', `Autopilot started by ${me.name} on this incident's data (${alerts} fraud alert${alerts === 1 ? '' : 's'} so far)`);
+  audit(ctx, 'run_autopilot', `${incidentId}: ${inc.title}`);
+  scheduleAutopilot(ctx, incidentId, 0);
+  progress(ctx, incidentId);
 });
 
 // ---------- Views: the only way clients read data ----------

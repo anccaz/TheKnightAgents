@@ -340,6 +340,8 @@ function Detections({ incidentId }: { incidentId: bigint }) {
 function NessieImport({ incidentId }: { incidentId: bigint }) {
   const me = useMe();
   const importFromNessie = useProcedure(procedures.importFromNessie);
+  const runAutopilot = useReducer(reducers.runAutopilot);
+  const incident = useCurrentIncident();
   const [cursors] = useTable(tables.nessieCursors);
   const run = useRun();
   const [busy, setBusy] = useState(false);
@@ -360,6 +362,18 @@ function NessieImport({ incidentId }: { incidentId: bigint }) {
       <Button type="button" variant="outline" disabled={busy} onClick={click}>
         <Download /> {busy ? 'Reading Nessie…' : cur ? 'Check next accounts in Nessie' : 'Import from Nessie (Capital One)'}
       </Button>
+      {cur && can(me, LEADS) && incident && incident.phase !== 'post_incident' && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() =>
+            window.confirm('Run autopilot on this Nessie data? The robot responder works through every phase on its own (drills only).') &&
+            run(runAutopilot({ incidentId }), 'Autopilot running on Nessie data')
+          }
+        >
+          <Zap /> Run autopilot on this data
+        </Button>
+      )}
       <span className="min-w-0 flex-1 text-muted-foreground">
         {last
           ? `${last.customers} customers in ${last.states} states · checked ${last.checked} of ${last.accounts} accounts · ${last.raised} new fraud alert${last.raised === 1 ? '' : 's'}`

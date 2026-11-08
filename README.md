@@ -124,6 +124,8 @@ Per-sponsor demo scripts: [docs/demo-script.md](docs/demo-script.md). A recorded
 ## Demo: real bank data from Nessie (Capital One)
 **In the app (one click).** On the Incident page, **Import from Nessie (Capital One)** sits in Incoming detections. The server (a SpacetimeDB procedure, like the Gemini calls) reads Nessie: customers by state fill **Who must we tell first**, their records are marked stolen (legal clocks start), and withdrawals/bills are scanned with the same fraud rule as the CLI importer. Procedures make HTTP calls one at a time, so each click checks the next 20 accounts plus the "hot" ones (the live `--plant` targets and accounts already flagged); click again for the next batch. Reruns never duplicate alerts. It needs `NESSIE_API_KEY` in the database environment (publish with it set, or `--env-only`). Tested locally: 786 customers in 6 states, 3 real planted withdrawals flagged in about 15 seconds. Live moment: run `node scripts/seed-nessie.mjs --plant`, then click **Check next accounts in Nessie**: the new withdrawal appears (and freezes if the team is in Contain).
 
+**Autopilot on Nessie data.** After an import, leads see **Run autopilot on this data**: the robot responder (same as the Autopilot drill, but with no scripted attack) works through all six phases using the imported customers, stolen records and fraud alerts. Tested locally: about 40 seconds from click to Lessons learned, 21 of 21 tasks, every Nessie fraud alert frozen. Recipe: **New incident** > declare > **Import from Nessie** > **Run autopilot on this data**.
+
 Freezes are recorded in Knight Agent as the team's decision; Nessie has no freeze endpoint, so nothing is changed in Nessie itself. In production this is where the bank's core system would be called.
 
 **From the terminal.** Instead of the scripted drill, an incident can be filled from Capital One's Nessie API. Put `NESSIE_API_KEY=...` in the root `.env` (never commit it). The `spacetime` CLI identity must be a member: run `spacetime login show`, then add that ID on **Team** (incident lead or admin if it should also create incidents, responder is enough to import).
@@ -183,7 +185,7 @@ docs/                     plan.md, agent-prompts.md, demo-script.md
 | Lane | Owner | Owns | Reducers |
 |---|---|---|---|
 | A | Annie | Access control, roles, audit log, views, Maincloud | `addMember` `setRole` `removeMember` |
-| B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `signOffTask` `sendMessage` `setNotifyStatus` `startDrill` `startAutopilotDrill` `stopDrill` `stayInPhase` `askAdvisor` `logAdvisorAction` |
+| B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `signOffTask` `sendMessage` `setNotifyStatus` `startDrill` `startAutopilotDrill` `runAutopilot` `stopDrill` `stayInPhase` `askAdvisor` `logAdvisorAction` |
 | C | Navya | Nessie seed and importer, scope, fraud watch | `importFromNessie` `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` `setStateImpact` |
 | D | Navya | Legal rules, Gemini drafts, Devpost, pitch | `startLegalClock` `completeLegalClock` `draftNotice` |
 

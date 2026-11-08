@@ -202,6 +202,30 @@ test('autopilot drives an incident through all six phases', () => {
   expect(clocksFiled).toBe(true);
 });
 
+test('autopilot runs on an existing incident filled with imported data', () => {
+  const h = setup();
+  expect(() => h.withReducerTx(as('admin'), ctx => mod.runAutopilot(ctx, { incidentId: 1n }))).toThrow(/import from Nessie/);
+  // What Import from Nessie leaves behind: customers by state, stolen records, a flagged account and its fraud alerts.
+  h.withReducerTx(as('admin'), ctx => mod.setStateImpact(ctx, { incidentId: 1n, state: 'TX', records: 162n }));
+  h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, { ...scope('exfiltrated', 260n, 'nessie-customers'), assetType: 'customer' }));
+  for (const amountCents of [2_041_200n, 849_000n])
+    h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, { incidentId: 1n, accountRef: 'CHK-4085', transferRef: `withdrawal:${amountCents}`, amountCents, reason: 'r' }));
+  h.withReducerTx(as('admin'), ctx => mod.runAutopilot(ctx, { incidentId: 1n }));
+  expect(() => h.withReducerTx(as('admin'), ctx => mod.runAutopilot(ctx, { incidentId: 1n }))).toThrow(/already running/);
+  for (let tick = 0; tick < 80 && phaseOf(h) !== 'post_incident'; tick++) {
+    h.withReducerTx(TestAuth.internal(), ctx => mod.runAutopilotStep(ctx, { row: { scheduledId: 0n, scheduledAt: ScheduleAt.time(0n), incidentId: 1n, tick } }));
+    for (const row of pendingAdvance(h).filter(r => r.incidentId === 1n)) {
+      expect(Number(row.at.microsSinceUnixEpoch - h.withReducerTx(as('admin'), ctx => ctx.timestamp.microsSinceUnixEpoch))).toBeLessThan(10_000_000); // fast countdown
+      h.withReducerTx(TestAuth.internal(), ctx => mod.runPhaseAdvance(ctx, { row }));
+    }
+  }
+  for (let tick = 0; tick < 6; tick++)
+    h.withReducerTx(TestAuth.internal(), ctx => mod.runAutopilotStep(ctx, { row: { scheduledId: 0n, scheduledAt: ScheduleAt.time(0n), incidentId: 1n, tick } }));
+  expect(phaseOf(h)).toBe('post_incident');
+  expect(tasksOf(h, 'post_incident').every(t => t.done)).toBe(true);
+  expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()].filter(a => a.status === 'open').length)).toBe(0);
+});
+
 test('SEC 8-K clock lands 4 business days out, never on a weekend', () => {
   const h = setup();
   h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, scope('exfiltrated', 100n)));
