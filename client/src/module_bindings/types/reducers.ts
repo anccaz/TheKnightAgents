@@ -13,6 +13,7 @@ import CompleteLegalClockReducer from "../complete_legal_clock_reducer";
 import CreateIncidentReducer from "../create_incident_reducer";
 import LogAdvisorActionReducer from "../log_advisor_action_reducer";
 import RaiseFraudAlertReducer from "../raise_fraud_alert_reducer";
+import RemoveMemberReducer from "../remove_member_reducer";
 import SendMessageReducer from "../send_message_reducer";
 import SetFraudAlertStatusReducer from "../set_fraud_alert_status_reducer";
 import SetNotifyStatusReducer from "../set_notify_status_reducer";
@@ -35,6 +36,7 @@ export type CompleteLegalClockParams = __Infer<typeof CompleteLegalClockReducer>
 export type CreateIncidentParams = __Infer<typeof CreateIncidentReducer>;
 export type LogAdvisorActionParams = __Infer<typeof LogAdvisorActionReducer>;
 export type RaiseFraudAlertParams = __Infer<typeof RaiseFraudAlertReducer>;
+export type RemoveMemberParams = __Infer<typeof RemoveMemberReducer>;
 export type SendMessageParams = __Infer<typeof SendMessageReducer>;
 export type SetFraudAlertStatusParams = __Infer<typeof SetFraudAlertStatusReducer>;
 export type SetNotifyStatusParams = __Infer<typeof SetNotifyStatusReducer>;

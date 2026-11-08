@@ -195,6 +195,12 @@ export default function TeamPage() {
     run(setRoleCall({ target: memberIdentity, role }), 'Role updated');
   };
 
+  const removeMemberCall = useReducer(reducers.removeMember);
+  const handleRemove = (memberIdentity: Identity, name: string) => {
+    if (!window.confirm(`Remove ${name}? They lose access immediately. Use this if their device may be compromised.`)) return;
+    run(removeMemberCall({ target: memberIdentity }), `${name} removed`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Operator Credential Card */}
@@ -298,6 +304,17 @@ export default function TeamPage() {
                   <span className="border border-border px-2 py-0.5 text-zinc-400">
                     {ROLE_LABEL[m.role] ?? m.role}
                   </span>
+                )}
+                {me?.role === 'admin' && !(identity && m.identity.isEqual(identity)) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-magenta/60 text-magenta hover:text-magenta"
+                    onClick={() => handleRemove(m.identity, m.name)}
+                  >
+                    Remove
+                  </Button>
                 )}
               </div>
             </div>

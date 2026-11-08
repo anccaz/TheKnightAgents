@@ -41,6 +41,7 @@ import CompleteLegalClockReducer from "./complete_legal_clock_reducer";
 import CreateIncidentReducer from "./create_incident_reducer";
 import LogAdvisorActionReducer from "./log_advisor_action_reducer";
 import RaiseFraudAlertReducer from "./raise_fraud_alert_reducer";
+import RemoveMemberReducer from "./remove_member_reducer";
 import SendMessageReducer from "./send_message_reducer";
 import SetFraudAlertStatusReducer from "./set_fraud_alert_status_reducer";
 import SetNotifyStatusReducer from "./set_notify_status_reducer";
@@ -189,6 +190,7 @@ const reducersSchema = __reducers(
   __reducerSchema("create_incident", CreateIncidentReducer),
   __reducerSchema("log_advisor_action", LogAdvisorActionReducer),
   __reducerSchema("raise_fraud_alert", RaiseFraudAlertReducer),
+  __reducerSchema("remove_member", RemoveMemberReducer),
   __reducerSchema("send_message", SendMessageReducer),
   __reducerSchema("set_fraud_alert_status", SetFraudAlertStatusReducer),
   __reducerSchema("set_notify_status", SetNotifyStatusReducer),

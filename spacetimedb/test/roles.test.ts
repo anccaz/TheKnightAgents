@@ -38,6 +38,17 @@ test('responder cannot change phase, exec cannot post in #legal, stranger cannot
   expect(() => h.withReducerTx(as('stranger'), ctx => mod.sendMessage(ctx, { channelId: 1n, text: 'hi' }))).toThrow(/Not a member/);
 });
 
+test('admin can remove a member, who then sees nothing; responders cannot remove; last admin stays', () => {
+  const h = setup();
+  const resp = h.withReducerTx(as('responder'), ctx => ctx.sender);
+  expect(() => h.withReducerTx(as('responder'), ctx => mod.removeMember(ctx, { target: resp }))).toThrow(/Requires role/);
+  h.withReducerTx(as('admin'), ctx => mod.removeMember(ctx, { target: resp }));
+  expect((mod.incidents as any)(h.viewContext(as('responder'))).length).toBe(0);
+  expect(() => h.withReducerTx(as('responder'), ctx => mod.sendMessage(ctx, { channelId: 1n, text: 'hi' }))).toThrow(/Not a member/);
+  expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.auditLog.iter()].some(a => a.action === 'remove_member'))).toBe(true);
+  expect(() => h.withReducerTx(as('admin'), ctx => mod.removeMember(ctx, { target: ctx.sender }))).toThrow(/last admin/);
+});
+
 test('last admin cannot demote themselves', () => {
   const h = setup();
   expect(() => h.withReducerTx(as('admin'), ctx => mod.setRole(ctx, { target: ctx.sender, role: 'responder' }))).toThrow(/last admin/);

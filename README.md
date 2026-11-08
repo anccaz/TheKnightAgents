@@ -97,7 +97,7 @@ The header always shows the incident ID (for example `INC-2026-0005`, from the d
 
 **Live Feed.** **Who must we tell first** at the top: a bubble chart of every notice owed (state customers, state Attorney General, bank regulator, SEC), placed by time left and people affected, with a notice queue where you click **Mark drafted**, **Mark sent** or **Reopen**. Below it, **Deadlines** (live countdowns, mark filed, **Start clock** for a custom one), then one merged feed of chat, timeline and security events with **All / Chat / Auto / Security** filters. The composer sends to the selected channel (#general, #containment, #legal for lawyers and leads only, #exec) or, with **Log as incident note**, writes to the timeline.
 
-**Team** (admins only). **Add member** by ID with a name, email and role (admin, incident lead, responder, legal, exec viewer), change roles from the **Members** list, and read **Security events**, the append-only audit log, with an action filter.
+**Team** (admins only). **Add member** by ID with a name, email and role (admin, incident lead, responder, legal, exec viewer), change roles from the **Members** list, **Remove** a member at once (for example if their laptop is compromised; the last admin cannot be removed, and it is audited), and read **Security events**, the append-only audit log, with an action filter.
 
 ## Demo: Run 2 AM drill
 An incident lead clicks **Run 2 AM drill** on the Incident page. A new incident "DRILL: Ransomware at First Avon Bank" opens and a scripted attack plays out over about 90 seconds on every connected screen: an EDR encryption alert, the core banking database encrypted, a ransom note in #general, a 3.1 GB outbound transfer, 12,500 customer records stolen (TX, CA, FL, GA, NC, NY, TN), three fraudulent transfers, and an online banking server accessed. **Stop drill** cancels the remaining steps.
@@ -175,7 +175,7 @@ docs/                     plan.md, agent-prompts.md, demo-script.md
 ## Lanes
 | Lane | Owner | Owns | Reducers |
 |---|---|---|---|
-| A | Annie | Access control, roles, audit log, views, Maincloud | `addMember` `setRole` |
+| A | Annie | Access control, roles, audit log, views, Maincloud | `addMember` `setRole` `removeMember` |
 | B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `signOffTask` `sendMessage` `setNotifyStatus` `startDrill` `startAutopilotDrill` `stopDrill` `stayInPhase` `askAdvisor` `logAdvisorAction` |
 | C | Navya | Nessie seed and importer, scope, fraud watch | `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` `setStateImpact` |
 | D | Navya | Legal rules, Gemini drafts, Devpost, pitch | `startLegalClock` `completeLegalClock` `draftNotice` |

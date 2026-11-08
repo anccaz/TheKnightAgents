@@ -591,6 +591,17 @@ export const setRole = db.reducer({ target: t.identity(), role: t.string() }, (c
   audit(ctx, 'set_role', `${u.email} -> ${role}`);
 });
 
+/** Revoke access at once (e.g. a responder's laptop is compromised mid-incident). Their views go empty immediately. */
+export const removeMember = db.reducer({ target: t.identity() }, (ctx, { target }) => {
+  requireRole(ctx, 'admin');
+  const u = ctx.db.user.identity.find(target);
+  if (!u) throw new SenderError('No such user');
+  if (u.role === 'admin' && [...ctx.db.user.iter()].filter(x => x.role === 'admin').length === 1)
+    throw new SenderError('Cannot remove the last admin');
+  ctx.db.user.identity.delete(target);
+  audit(ctx, 'remove_member', `${u.email} (${u.role}) removed`);
+});
+
 // ---------- Incidents & timeline (Lane B) ----------
 export const createIncident = db.reducer(
   { title: t.string(), severity: t.string(), kind: t.string() },
