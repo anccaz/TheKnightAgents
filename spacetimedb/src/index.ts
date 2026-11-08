@@ -1246,6 +1246,72 @@ export const logAdvisorAction = db.reducer({ incidentId: t.u64(), label: t.strin
   audit(ctx, 'advisor_action', text);
 });
 
+// ---------- AI agents: Counsel and Comms brief the team at every phase ----------
+// Each agent works under a role and sees only what that role may see (the same advisorFacts filter people get):
+// Counsel reads as `legal` (no money), Comms reads as `exec_viewer`. They post into the channel of that role,
+// signed by the module identity ("Knight Agent"). Agents advise; humans still make every decision.
+// shortcut: the agent role is applied by our code, not by a member row; give agents real member rows if they ever act.
+const AGENT_PREFIX = '🤖';
+const AGENTS = [
+  {
+    name: 'Counsel', role: 'legal', channel: 'legal',
+    brief: 'You are Counsel, the bank\'s AI legal agent during a cyber incident. Write a short briefing for the legal team: which deadlines are running and how long is left, which notices must be drafted or sent next, and one legal risk to watch in this phase. You cannot see money; never guess amounts.',
+    fallback: (lines: string[]) => lines.filter(l => /^\[(D|S|A)\d/.test(l)).slice(0, 5),
+  },
+  {
+    name: 'Comms', role: 'exec_viewer', channel: 'exec',
+    brief: 'You are Comms, the bank\'s AI executive-briefing agent during a cyber incident. Write a short briefing for executives: the situation in one line, money at risk or frozen, and the one decision leadership should make next.',
+    fallback: (lines: string[]) => lines.filter(l => /^\[(I|F|D)\d*\]/.test(l)).slice(0, 5),
+  },
+] as const;
+const agentMarker = (phase: string) => `AI agents (Counsel, Comms) briefed the team for ${PHASE_LABELS[phase] ?? phase}`;
+
+/** Runs both agents once per phase; extra calls (several leads, page reloads) return without doing anything. */
+export const runAgents = db.procedure({ incidentId: t.u64() }, t.string(), (ctx, { incidentId }) => {
+  // 1. Claim this phase and gather each agent's facts in one transaction, so two callers never both post.
+  const job = ctx.withTx(tx => {
+    requireRole(tx, 'incident_lead');
+    const inc = requireIncident(tx, incidentId);
+    const marker = agentMarker(inc.phase);
+    if ([...tx.db.timelineEvent.incidentId.filter(incidentId)].some(e => e.text === marker)) return null;
+    timeline(tx, incidentId, 'auto', marker);
+    return { phase: inc.phase, facts: AGENTS.map(a => advisorFacts(tx, inc, a.role, '[]').lines) };
+  });
+  if (!job) return 'already briefed';
+  let key: string | undefined;
+  let model: string | null = null;
+  try {
+    key = ctx.env.GEMINI_API_KEY;
+    model = ctx.env.GEMINI_MODEL || null;
+  } catch {
+    key = undefined; // no environment (unit tests): use the fixed fallback
+  }
+  // 2. Ask Gemini outside any transaction (HTTP is not allowed inside withTx).
+  const posts = AGENTS.map((a, i) => {
+    const lines = job.facts[i];
+    let text: string | null = null;
+    if (key) {
+      const prompt = [a.brief, `Current phase: ${PHASE_LABELS[job.phase] ?? job.phase}.`, 'Use only these facts; cite them by their [TAG]. Plain text, no markdown, at most 3 short bullets starting with "- ", under 90 words.', '', ...lines].join('\n');
+      try {
+        text = geminiGenerate(ctx, key, model, prompt, { temperature: 0.2, maxOutputTokens: 300 }, `agent${a.name}`).text;
+      } catch {
+        text = null;
+      }
+    }
+    const body = text ?? a.fallback(lines).map(l => `- ${l}`).join('\n');
+    return { a, text: `${AGENT_PREFIX} ${a.name} agent (${a.role.replace('_', ' ')} access), ${PHASE_LABELS[job.phase] ?? job.phase}${text ? '' : ' (offline summary)'}:\n${body || '- Nothing new for this role yet.'}` };
+  });
+  // 3. Post each briefing in its role's channel.
+  ctx.withTx(tx => {
+    for (const { a, text } of posts) {
+      const ch = [...tx.db.channel.incidentId.filter(incidentId)].find(c => c.name === a.channel);
+      if (ch) tx.db.message.insert({ id: 0n, channelId: ch.id, sender: tx.identity, text: text.slice(0, 1500), sentAt: tx.timestamp });
+    }
+    audit(tx, 'ai_agents', `${job.phase}: ${posts.map(p => p.a.name).join(', ')}`);
+  });
+  return 'briefed';
+});
+
 // ---------- Attack drill: a scripted attack that plays out live ----------
 // Each step runs `waitSec` after the previous one. Events go through the same helpers
 // as human actions, so the auto-rules (legal clocks, auto-freeze) fire on their own.

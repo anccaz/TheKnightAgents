@@ -86,6 +86,7 @@ export default function IncidentPage() {
       </section>
       <Detections incidentId={incident.id} />
       <NessiePanel incidentId={incident.id} />
+      <AgentsPanel incidentId={incident.id} phase={incident.phase} />
       {summary && <AfterActionSummary incident={incident} />}
       <div className="grid gap-6 lg:grid-cols-2">
         <IncidentRecord incident={incident} />
@@ -386,6 +387,44 @@ function NessieImport({ incidentId }: { incidentId: bigint }) {
             : "Loads the bank's customers by state and scans their withdrawals and bills for fraud."}
       </span>
     </div>
+  );
+}
+
+/**
+ * AI agents (Counsel, Comms) brief their channels once per phase. A lead's screen starts them when the phase changes;
+ * the server makes sure it happens once. Each viewer only receives the briefings their role's channels allow.
+ */
+function AgentsPanel({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+  const me = useMe();
+  const runAgents = useProcedure(procedures.runAgents);
+  const [channels] = useTable(tables.channels);
+  const [messages] = useTable(tables.messages);
+  const lead = can(me, LEADS);
+  useEffect(() => {
+    if (lead) runAgents({ incidentId }).catch(e => console.warn('AI agents:', e));
+  }, [lead, incidentId, phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mine = new Map(channels.filter(c => c.incidentId === incidentId).map(c => [c.id, c.name]));
+  const latest = ['Counsel', 'Comms']
+    .map(name => messages.filter(m => mine.has(m.channelId) && m.text.startsWith(`🤖 ${name} agent`)).sort((a, b) => Number(b.id - a.id))[0])
+    .filter(m => m !== undefined);
+  if (!latest.length) return null;
+  return (
+    <Panel title="AI agents">
+      <div className="grid gap-3 lg:grid-cols-2">
+        {latest.map(m => {
+          const [head, ...body] = m.text.replace(/^🤖 /, '').split('\n');
+          return (
+            <div key={`${m.id}`} className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
+              <div className="mb-1 font-mono text-xs tracking-wider text-primary uppercase">
+                🤖 {head.replace(/:$/, '')} · #{mine.get(m.channelId)}
+              </div>
+              <p className="whitespace-pre-line text-foreground">{body.join('\n')}</p>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">Agents only see what their role may see, and they advise: people still make every decision.</p>
+    </Panel>
   );
 }
 

@@ -62,6 +62,7 @@ import UpsertScopeItemReducer from "./upsert_scope_item_reducer";
 import * as AskAdvisorProcedure from "./ask_advisor_procedure";
 import * as DraftNoticeProcedure from "./draft_notice_procedure";
 import * as ImportFromNessieProcedure from "./import_from_nessie_procedure";
+import * as RunAgentsProcedure from "./run_agents_procedure";
 
 // Import all table schema definitions
 import AuditEntriesRow from "./audit_entries_table";
@@ -223,6 +224,7 @@ const proceduresSchema = __procedures(
   __procedureSchema("ask_advisor", AskAdvisorProcedure.params, AskAdvisorProcedure.returnType),
   __procedureSchema("draft_notice", DraftNoticeProcedure.params, DraftNoticeProcedure.returnType),
   __procedureSchema("import_from_nessie", ImportFromNessieProcedure.params, ImportFromNessieProcedure.returnType),
+  __procedureSchema("run_agents", RunAgentsProcedure.params, RunAgentsProcedure.returnType),
 );
 
 /** The remote SpacetimeDB module schema, both runtime and type information. */
