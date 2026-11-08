@@ -171,6 +171,33 @@ const notifyStatus = table(
   }
 );
 
+// Pending automatic phase advance (fires unless the lead clicks "Stay here").
+const phaseAdvance = table(
+  {},
+  {
+    scheduledId: t.u64().primaryKey().autoInc(),
+    scheduledAt: t.scheduleAt(),
+    incidentId: t.u64().index(),
+    fromPhase: t.string(),
+    toPhase: t.string(),
+    at: t.timestamp(), // same moment as scheduledAt, readable by clients for the countdown
+  }
+);
+
+// The lead chose to stay in this phase: no auto-advance until the phase changes.
+const phaseHold = table({}, { incidentId: t.u64().primaryKey(), phase: t.string() });
+
+// Autopilot drill ticks: each tick performs the next unfinished task of the current phase.
+const autopilotStep = table(
+  {},
+  {
+    scheduledId: t.u64().primaryKey().autoInc(),
+    scheduledAt: t.scheduleAt(),
+    incidentId: t.u64(),
+    tick: t.u32(),
+  }
+);
+
 // Pending steps of a running attack drill; each row fires runDrillStep at its time.
 const drillStep = table(
   {},
@@ -187,6 +214,9 @@ const db = schema({
   drillStep,
   stateImpact,
   notifyStatus,
+  phaseAdvance,
+  phaseHold,
+  autopilotStep,
   user,
   incident,
   timelineEvent,
@@ -365,6 +395,77 @@ function execUpdate(ctx: Ctx, incidentId: bigint) {
   ctx.db.message.insert({ id: 0n, channelId: exec.id, sender: ctx.sender, text: `Status update — ${parts.join(' · ')}`, sentAt: ctx.timestamp });
 }
 
+// ---------- Smart flow: tasks tick themselves, phases advance themselves ----------
+// Guided tasks the system can verify on its own. Everything else stays a human judgement call.
+const AUTO_TASKS: Record<string, (ctx: Ctx, id: bigint) => boolean> = {
+  'Write what you saw and when in the timeline': (ctx, id) =>
+    [...ctx.db.timelineEvent.incidentId.filter(id)].some(e => e.kind === 'ioc' || (e.kind === 'note' && !e.text.startsWith('Incident declared'))),
+  'List every affected system and customer in What was hit': (ctx, id) => [...ctx.db.scopeItem.incidentId.filter(id)].length > 0,
+  'Confirm with Legal that the deadline clocks are right': (ctx, id) => [...ctx.db.legalClock.incidentId.filter(id)].length > 0,
+  'Review every fraud alert: freeze or dismiss': (ctx, id) => ![...ctx.db.fraudAlert.incidentId.filter(id)].some(a => a.status === 'open'),
+  'Send customer notices once Legal approves': (ctx, id) => {
+    const states = [...ctx.db.stateImpact.incidentId.filter(id)].filter(s => s.records > 0n);
+    const sent = new Set([...ctx.db.notifyStatus.incidentId.filter(id)].filter(n => n.status === 'sent').map(n => n.notice));
+    return states.length > 0 && states.every(s => sent.has(`${s.state}-Customers`));
+  },
+  'Mark every legal deadline as filed': (ctx, id) => {
+    const clocks = [...ctx.db.legalClock.incidentId.filter(id)];
+    return clocks.length > 0 && clocks.every(c => c.done);
+  },
+};
+const ADVANCE_SEC = 30;
+const AUTOPILOT_ADVANCE_SEC = 6;
+const isAutopilot = (title: string) => title.startsWith('AUTOPILOT');
+const nextPhase = (phase: string) => PHASES[PHASES.indexOf(phase as (typeof PHASES)[number]) + 1];
+
+function cancelAdvance(ctx: Ctx, incidentId: bigint, note?: string) {
+  const pending = [...ctx.db.phaseAdvance.incidentId.filter(incidentId)];
+  for (const p of pending) ctx.db.phaseAdvance.scheduledId.delete(p.scheduledId);
+  if (pending.length && note) timeline(ctx, incidentId, 'auto', note);
+}
+
+/** Tick verifiable tasks, then start (or cancel) the auto-advance countdown. Call after anything that changes progress. */
+function progress(ctx: Ctx, incidentId: bigint) {
+  const inc = ctx.db.incident.id.find(incidentId);
+  if (!inc) return;
+  for (const tk of [...ctx.db.task.incidentId.filter(incidentId)])
+    if (tk.phase === inc.phase && !tk.done && AUTO_TASKS[tk.title]?.(ctx, incidentId)) {
+      ctx.db.task.id.update({ ...tk, done: true });
+      timeline(ctx, incidentId, 'auto', `Task done: ${tk.title}`);
+    }
+  const current = [...ctx.db.task.incidentId.filter(incidentId)].filter(tk => tk.phase === inc.phase);
+  const ready = current.length > 0 && current.every(tk => tk.done);
+  const to = nextPhase(inc.phase);
+  const pending = [...ctx.db.phaseAdvance.incidentId.filter(incidentId)];
+  if (!ready || !to) {
+    if (pending.length) cancelAdvance(ctx, incidentId, `Auto-advance cancelled: ${PHASE_LABELS[inc.phase]} has open tasks again`);
+    return;
+  }
+  if (pending.length || ctx.db.phaseHold.incidentId.find(incidentId)?.phase === inc.phase) return;
+  const secs = isAutopilot(inc.title) ? AUTOPILOT_ADVANCE_SEC : ADVANCE_SEC;
+  const at = new Timestamp(ctx.timestamp.microsSinceUnixEpoch + BigInt(secs) * 1_000_000n);
+  ctx.db.phaseAdvance.insert({ scheduledId: 0n, scheduledAt: ScheduleAt.time(at.microsSinceUnixEpoch), incidentId, fromPhase: inc.phase, toPhase: to, at });
+  timeline(ctx, incidentId, 'auto', `All ${PHASE_LABELS[inc.phase]} tasks done: moving to ${PHASE_LABELS[to]} in ${secs} s unless the lead stays`);
+}
+
+function movePhase(ctx: Ctx, incidentId: bigint, phase: string) {
+  const inc = ctx.db.incident.id.find(incidentId)!;
+  ctx.db.incident.id.update({ ...inc, phase });
+  timeline(ctx, incidentId, 'phase_change', `${inc.phase} -> ${phase}`);
+  addGuidedTasks(ctx, incidentId, phase);
+  audit(ctx, 'set_phase', `${incidentId}: ${phase}`);
+  cancelAdvance(ctx, incidentId);
+  const hold = ctx.db.phaseHold.incidentId.find(incidentId);
+  if (hold && hold.phase !== phase) ctx.db.phaseHold.incidentId.delete(incidentId);
+  execUpdate(ctx, incidentId);
+  progress(ctx, incidentId);
+}
+
+function holdPhase(ctx: Ctx, incidentId: bigint, phase: string) {
+  if (ctx.db.phaseHold.incidentId.find(incidentId)) ctx.db.phaseHold.incidentId.update({ incidentId, phase });
+  else ctx.db.phaseHold.insert({ incidentId, phase });
+}
+
 // ---------- Lifecycle ----------
 // Runs once on first publish; the sender is whoever published (the CLI identity).
 export const init = db.init(ctx => {
@@ -423,11 +524,25 @@ export const setPhase = db.reducer({ incidentId: t.u64(), phase: t.string() }, (
   requireRole(ctx, 'incident_lead');
   oneOf(phase, PHASES, 'phase');
   const inc = requireIncident(ctx, incidentId);
-  ctx.db.incident.id.update({ ...inc, phase });
-  timeline(ctx, incidentId, 'phase_change', `${inc.phase} -> ${phase}`);
-  addGuidedTasks(ctx, incidentId, phase);
-  audit(ctx, 'set_phase', `${incidentId}: ${phase}`);
-  execUpdate(ctx, incidentId);
+  // Going back on purpose means "work this phase again": don't auto-advance out of it.
+  if (PHASES.indexOf(phase as (typeof PHASES)[number]) < PHASES.indexOf(inc.phase as (typeof PHASES)[number])) holdPhase(ctx, incidentId, phase);
+  movePhase(ctx, incidentId, phase);
+});
+
+export const stayInPhase = db.reducer({ incidentId: t.u64() }, (ctx, { incidentId }) => {
+  const me = requireRole(ctx, 'incident_lead');
+  const inc = requireIncident(ctx, incidentId);
+  holdPhase(ctx, incidentId, inc.phase);
+  cancelAdvance(ctx, incidentId, `${me.name} chose to stay in ${PHASE_LABELS[inc.phase]}`);
+});
+
+export const runPhaseAdvance = db.reducer({ onSchedule: phaseAdvance }, { row: phaseAdvance.rowType }, (ctx, { row }) => {
+  if (!ctx.senderAuth.isInternal) throw new SenderError('Phase advance runs on the schedule only');
+  const inc = ctx.db.incident.id.find(row.incidentId);
+  if (!inc || inc.phase !== row.fromPhase) return;
+  const current = [...ctx.db.task.incidentId.filter(row.incidentId)].filter(tk => tk.phase === inc.phase);
+  if (current.some(tk => !tk.done)) return;
+  movePhase(ctx, row.incidentId, row.toPhase);
 });
 
 export const addTimelineEvent = db.reducer(
@@ -436,6 +551,7 @@ export const addTimelineEvent = db.reducer(
     requireRole(ctx, ...WRITERS);
     requireIncident(ctx, incidentId);
     timeline(ctx, incidentId, kind, text);
+    progress(ctx, incidentId);
   }
 );
 
@@ -446,6 +562,7 @@ export const addTask = db.reducer(
     requireIncident(ctx, incidentId);
     oneOf(phase, PHASES, 'phase');
     ctx.db.task.insert({ id: 0n, incidentId, title, phase, done: false, createdBy: ctx.sender });
+    progress(ctx, incidentId);
   }
 );
 
@@ -454,6 +571,7 @@ export const toggleTask = db.reducer({ taskId: t.u64() }, (ctx, { taskId }) => {
   const tk = ctx.db.task.id.find(taskId);
   if (!tk) throw new SenderError('No such task');
   ctx.db.task.id.update({ ...tk, done: !tk.done });
+  progress(ctx, tk.incidentId);
 });
 
 // ---------- Comms (Lane B) ----------
@@ -480,6 +598,7 @@ export const upsertScopeItem = db.reducer(
     requireRole(ctx, ...WRITERS);
     requireIncident(ctx, args.incidentId);
     setScope(ctx, args);
+    progress(ctx, args.incidentId);
   }
 );
 
@@ -490,6 +609,7 @@ export const raiseFraudAlert = db.reducer(
     requireRole(ctx, ...WRITERS);
     requireIncident(ctx, args.incidentId);
     raiseAlert(ctx, args);
+    progress(ctx, args.incidentId);
   }
 );
 
@@ -501,6 +621,7 @@ export const setFraudAlertStatus = db.reducer({ alertId: t.u64(), status: t.stri
   ctx.db.fraudAlert.id.update({ ...a, status });
   timeline(ctx, a.incidentId, 'action', `Fraud alert ${alertId} on ${a.accountRef}: ${status}`);
   audit(ctx, 'fraud_alert_status', `${alertId}: ${status}`);
+  progress(ctx, a.incidentId);
 });
 
 // ---------- Legal clocks (Lane D) ----------
@@ -511,6 +632,7 @@ export const startLegalClock = db.reducer(
     requireIncident(ctx, incidentId);
     startClock(ctx, incidentId, regime, label, hours);
     timeline(ctx, incidentId, 'action', `Legal clock started: ${label}`);
+    progress(ctx, incidentId);
   }
 );
 
@@ -520,6 +642,7 @@ export const completeLegalClock = db.reducer({ clockId: t.u64() }, (ctx, { clock
   if (!c) throw new SenderError('No such clock');
   ctx.db.legalClock.id.update({ ...c, done: true });
   audit(ctx, 'complete_legal_clock', c.label);
+  progress(ctx, c.incidentId);
 });
 
 function setStateRecords(ctx: Ctx, incidentId: bigint, state: string, records: bigint) {
@@ -545,17 +668,22 @@ export const setNotifyStatus = db.reducer(
     requireRole(ctx, 'incident_lead', 'responder', 'legal');
     requireIncident(ctx, incidentId);
     oneOf(status, NOTICE_STATUSES, 'notice status');
-    const existing = [...ctx.db.notifyStatus.incidentId.filter(incidentId)].find(n => n.notice === notice);
-    const row = { incidentId, notice, status, updatedAt: ctx.timestamp, updatedBy: ctx.sender };
-    if (existing) ctx.db.notifyStatus.id.update({ ...row, id: existing.id });
-    else ctx.db.notifyStatus.insert({ ...row, id: 0n });
-    timeline(ctx, incidentId, 'action', `Notice ${status === 'sent' ? 'sent' : status === 'drafted' ? 'drafted' : 'reopened'}: ${label}`);
-    if (status === 'sent') {
-      audit(ctx, 'notice_sent', label);
-      execUpdate(ctx, incidentId);
-    }
+    setNotice(ctx, incidentId, notice, label, status);
+    progress(ctx, incidentId);
   }
 );
+
+function setNotice(ctx: Ctx, incidentId: bigint, notice: string, label: string, status: string) {
+  const existing = [...ctx.db.notifyStatus.incidentId.filter(incidentId)].find(n => n.notice === notice);
+  const row = { incidentId, notice, status, updatedAt: ctx.timestamp, updatedBy: ctx.sender };
+  if (existing) ctx.db.notifyStatus.id.update({ ...row, id: existing.id });
+  else ctx.db.notifyStatus.insert({ ...row, id: 0n });
+  timeline(ctx, incidentId, 'action', `Notice ${status === 'sent' ? 'sent' : status === 'drafted' ? 'drafted' : 'reopened'}: ${label}`);
+  if (status === 'sent') {
+    audit(ctx, 'notice_sent', label);
+    execUpdate(ctx, incidentId);
+  }
+}
 
 // ---------- Attack drill: a scripted attack that plays out live ----------
 // Each step runs `waitSec` after the previous one. Events go through the same helpers
@@ -597,13 +725,23 @@ export const startDrill = db.reducer(ctx => {
   const inc = newIncident(ctx, 'DRILL: Ransomware at First Avon Bank', 'critical', 'ransomware');
   say(ctx, inc.id, 'general', 'Drill started. Treat everything below as real.');
   scheduleStep(ctx, inc.id, 0);
+  progress(ctx, inc.id);
 });
 
 export const stopDrill = db.reducer(ctx => {
   requireRole(ctx, 'incident_lead');
+  const stopped = new Set<bigint>();
   for (const row of [...ctx.db.drillStep.iter()]) {
     ctx.db.drillStep.scheduledId.delete(row.scheduledId);
-    timeline(ctx, row.incidentId, 'note', 'Drill stopped.');
+    stopped.add(row.incidentId);
+  }
+  for (const row of [...ctx.db.autopilotStep.iter()]) {
+    ctx.db.autopilotStep.scheduledId.delete(row.scheduledId);
+    stopped.add(row.incidentId);
+  }
+  for (const id of stopped) {
+    cancelAdvance(ctx, id);
+    timeline(ctx, id, 'note', 'Drill stopped.');
   }
 });
 
@@ -611,7 +749,61 @@ export const runDrillStep = db.reducer({ onSchedule: drillStep }, { row: drillSt
   if (!ctx.senderAuth.isInternal) throw new SenderError('Drill steps run on the schedule only');
   if (!ctx.db.incident.id.find(row.incidentId)) return;
   DRILL[row.step].run(ctx, row.incidentId);
+  progress(ctx, row.incidentId);
   if (row.step + 1 < DRILL.length) scheduleStep(ctx, row.incidentId, row.step + 1);
+});
+
+// ---------- Autopilot drill: the attack AND the response play out on their own ----------
+const AUTOPILOT_TICK_SEC = 5;
+const AUTOPILOT_MAX_TICKS = 120;
+
+function scheduleAutopilot(ctx: Ctx, incidentId: bigint, tick: number) {
+  const at = ctx.timestamp.microsSinceUnixEpoch + BigInt(AUTOPILOT_TICK_SEC) * 1_000_000n;
+  ctx.db.autopilotStep.insert({ scheduledId: 0n, scheduledAt: ScheduleAt.time(at), incidentId, tick });
+}
+
+export const startAutopilotDrill = db.reducer(ctx => {
+  requireRole(ctx, 'incident_lead');
+  const inc = newIncident(ctx, 'AUTOPILOT DRILL: Ransomware at First Avon Bank', 'critical', 'ransomware');
+  say(ctx, inc.id, 'general', 'Autopilot drill started: the attack and the response both play out on their own.');
+  scheduleStep(ctx, inc.id, 0);
+  scheduleAutopilot(ctx, inc.id, 0);
+  progress(ctx, inc.id);
+});
+
+/** One autopilot move: do the next unfinished task of the current phase, the way a responder would. */
+export const runAutopilotStep = db.reducer({ onSchedule: autopilotStep }, { row: autopilotStep.rowType }, (ctx, { row }) => {
+  if (!ctx.senderAuth.isInternal) throw new SenderError('Autopilot runs on the schedule only');
+  const inc = ctx.db.incident.id.find(row.incidentId);
+  if (!inc || row.tick > AUTOPILOT_MAX_TICKS) return;
+  const id = row.incidentId;
+  const open = [...ctx.db.task.incidentId.filter(id)]
+    .filter(tk => tk.phase === inc.phase && !tk.done)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  const tk = open[0];
+  if (tk && !AUTO_TASKS[tk.title]) {
+    ctx.db.task.id.update({ ...tk, done: true });
+    timeline(ctx, id, 'auto', `Autopilot: ${tk.title}`);
+  } else if (tk?.title === 'Review every fraud alert: freeze or dismiss') {
+    for (const a of [...ctx.db.fraudAlert.incidentId.filter(id)].filter(a => a.status === 'open')) {
+      ctx.db.fraudAlert.id.update({ ...a, status: 'frozen' });
+      timeline(ctx, id, 'auto', `Autopilot: froze account ${a.accountRef}`);
+    }
+  } else if (tk?.title === 'Send customer notices once Legal approves') {
+    for (const st of [...ctx.db.stateImpact.incidentId.filter(id)].filter(st => st.records > 0n))
+      setNotice(ctx, id, `${st.state}-Customers`, `${st.state} customers`, 'sent');
+  } else if (tk?.title === 'Mark every legal deadline as filed') {
+    for (const c of [...ctx.db.legalClock.incidentId.filter(id)].filter(c => !c.done)) {
+      ctx.db.legalClock.id.update({ ...c, done: true });
+      audit(ctx, 'complete_legal_clock', c.label);
+    }
+  } // other verifiable tasks wait for the attack script to produce their evidence
+  progress(ctx, id);
+  const after = ctx.db.incident.id.find(id)!;
+  const finished =
+    after.phase === 'post_incident' && [...ctx.db.task.incidentId.filter(id)].filter(t2 => t2.phase === after.phase).every(t2 => t2.done);
+  if (finished) timeline(ctx, id, 'note', 'Autopilot drill complete: every phase done.');
+  else scheduleAutopilot(ctx, id, row.tick + 1);
 });
 
 // ---------- Views: the only way clients read data ----------
@@ -654,6 +846,9 @@ export const stateImpacts = db.view({ name: 'stateImpacts', public: true }, t.ar
 );
 export const notifyStatuses = db.view({ name: 'notifyStatuses', public: true }, t.array(notifyStatus.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.notifyStatus.iter()] : []
+);
+export const phaseAdvances = db.view({ name: 'phaseAdvances', public: true }, t.array(phaseAdvance.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.phaseAdvance.iter()] : []
 );
 export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
   roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []

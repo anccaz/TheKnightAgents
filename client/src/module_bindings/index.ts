@@ -46,8 +46,10 @@ import SetNotifyStatusReducer from "./set_notify_status_reducer";
 import SetPhaseReducer from "./set_phase_reducer";
 import SetRoleReducer from "./set_role_reducer";
 import SetStateImpactReducer from "./set_state_impact_reducer";
+import StartAutopilotDrillReducer from "./start_autopilot_drill_reducer";
 import StartDrillReducer from "./start_drill_reducer";
 import StartLegalClockReducer from "./start_legal_clock_reducer";
+import StayInPhaseReducer from "./stay_in_phase_reducer";
 import StopDrillReducer from "./stop_drill_reducer";
 import ToggleTaskReducer from "./toggle_task_reducer";
 import UpsertScopeItemReducer from "./upsert_scope_item_reducer";
@@ -63,6 +65,7 @@ import LegalClocksRow from "./legal_clocks_table";
 import MembersRow from "./members_table";
 import MessagesRow from "./messages_table";
 import NotifyStatusesRow from "./notify_statuses_table";
+import PhaseAdvancesRow from "./phase_advances_table";
 import ScopeItemsRow from "./scope_items_table";
 import StateImpactsRow from "./state_impacts_table";
 import TasksRow from "./tasks_table";
@@ -128,6 +131,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, NotifyStatusesRow),
+  phaseAdvances: __table({
+    name: 'phaseAdvances',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, PhaseAdvancesRow),
   scopeItems: __table({
     name: 'scopeItems',
     indexes: [
@@ -172,8 +182,10 @@ const reducersSchema = __reducers(
   __reducerSchema("set_phase", SetPhaseReducer),
   __reducerSchema("set_role", SetRoleReducer),
   __reducerSchema("set_state_impact", SetStateImpactReducer),
+  __reducerSchema("start_autopilot_drill", StartAutopilotDrillReducer),
   __reducerSchema("start_drill", StartDrillReducer),
   __reducerSchema("start_legal_clock", StartLegalClockReducer),
+  __reducerSchema("stay_in_phase", StayInPhaseReducer),
   __reducerSchema("stop_drill", StopDrillReducer),
   __reducerSchema("toggle_task", ToggleTaskReducer),
   __reducerSchema("upsert_scope_item", UpsertScopeItemReducer),
