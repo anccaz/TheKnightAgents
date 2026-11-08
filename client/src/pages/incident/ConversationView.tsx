@@ -100,10 +100,46 @@ function Thread({ incident }: { incident: Incident }) {
   }
   items.sort((a, b) => a.at.getTime() - b.at.getTime());
 
+  // Follow new messages smoothly, but only while the reader is near the bottom: someone scrolled up to read stays put.
+  // Watching the DOM catches every change (new prompts, answers, cards growing), not just new rows.
+  const stick = useRef(true);
+  const toBottom = (smooth: boolean) => {
+    const el = list.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  };
   useEffect(() => {
     const el = list.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [items.length, view, asks]);
+    if (!el) return;
+    toBottom(false);
+    // Only scrolling up (a person reading back) stops the follow; our own smooth scroll only ever moves down.
+    let lastTop = el.scrollTop;
+    const onScroll = () => {
+      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+      if (near) stick.current = true;
+      else if (el.scrollTop < lastTop - 2) stick.current = false;
+      lastTop = el.scrollTop;
+    };
+    let frame = 0;
+    const follow = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => stick.current && toBottom(true));
+    });
+    el.addEventListener('scroll', onScroll, { passive: true });
+    follow.observe(el, { childList: true, subtree: true, characterData: true });
+    // Cards and fonts finish sizing after the first paint without changing the DOM: snap again once things settle.
+    const settle = [250, 800, 1600].map(ms => setTimeout(() => stick.current && toBottom(false), ms));
+    return () => {
+      settle.forEach(clearTimeout);
+      el.removeEventListener('scroll', onScroll);
+      follow.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [view]);
+  // A new phase or your own message always brings you back to the latest.
+  useEffect(() => {
+    stick.current = true;
+    toBottom(true);
+  }, [incident.phase, asks.length]);
 
   const sendTo = target ?? (view !== 'all' ? view : general?.id ?? null);
   const writer = can(me, WRITERS);
@@ -111,6 +147,7 @@ function Thread({ incident }: { incident: Incident }) {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
+    stick.current = true; // your own message: follow it down
     // "@agent ..." asks the incident advisor; the answer appears in this thread (only on this screen).
     const q = t.match(/^@agent\b[,:]?\s*(.*)$/i);
     if (q) {
@@ -161,7 +198,7 @@ function Thread({ incident }: { incident: Incident }) {
         )}
       </header>
 
-      <ol ref={list} className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4" aria-live="polite" aria-label="Messages">
+      <ol ref={list} className="flex flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-4 py-4 [overflow-anchor:none]" aria-live="polite" aria-label="Messages">
         {items.length === 0 && (
           <li className="m-auto max-w-sm text-center text-sm text-muted-foreground">
             The room is quiet. Detections, AI briefings and your team's messages will show up here as they happen.
