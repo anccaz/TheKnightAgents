@@ -362,6 +362,39 @@ function raiseAlert(ctx: Ctx, args: AlertArgs) {
   }
 }
 
+// ---------- Exec status update: one plain-words line in the incident's #exec channel ----------
+const PHASE_LABELS: Record<string, string> = {
+  detect: 'Detect', analyze: 'Analyze', contain: 'Contain', eradicate: 'Remove threat', recover: 'Recover', post_incident: 'Lessons learned',
+};
+
+function execUpdate(ctx: Ctx, incidentId: bigint) {
+  const inc = ctx.db.incident.id.find(incidentId);
+  const exec = [...ctx.db.channel.incidentId.filter(incidentId)].find(c => c.name === 'exec');
+  if (!inc || !exec) return;
+  const parts = [`Phase: ${PHASE_LABELS[inc.phase] ?? inc.phase}`];
+  const stolen = [...ctx.db.scopeItem.incidentId.filter(incidentId)]
+    .filter(s => s.status === 'exfiltrated')
+    .reduce((n, s) => n + s.recordsCount, 0n);
+  if (stolen) parts.push(`${stolen.toLocaleString()} records stolen`);
+  const clocks = [...ctx.db.legalClock.incidentId.filter(incidentId)];
+  // Only exact counts here: per-state notice rules live in the client chart, so we report states, not "notices owed".
+  const states = [...ctx.db.stateImpact.incidentId.filter(incidentId)].filter(s => s.records > 0n).length;
+  const sent = [...ctx.db.notifyStatus.incidentId.filter(incidentId)].filter(n => n.status === 'sent').length;
+  if (states) parts.push(`${states} ${states === 1 ? 'state' : 'states'} affected`);
+  if (sent) parts.push(`${sent} ${sent === 1 ? 'notice' : 'notices'} sent`);
+  const next = clocks.filter(c => !c.done).map(c => c.deadlineAt.microsSinceUnixEpoch).sort((a, b) => (a < b ? -1 : 1))[0];
+  if (next !== undefined) {
+    const mins = Number((next - ctx.timestamp.microsSinceUnixEpoch) / 60_000_000n);
+    const d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60;
+    parts.push(mins <= 0 ? 'a deadline has passed' : `next deadline in ${d ? `${d}d ${h}h` : `${h}h ${m}m`}`);
+  }
+  const frozen = [...ctx.db.fraudAlert.incidentId.filter(incidentId)]
+    .filter(a => a.status === 'frozen')
+    .reduce((n, a) => n + a.amountCents, 0n);
+  if (frozen) parts.push(`$${(frozen / 100n).toLocaleString()} frozen`);
+  ctx.db.message.insert({ id: 0n, channelId: exec.id, sender: ctx.sender, text: `Status update — ${parts.join(' · ')}`, sentAt: ctx.timestamp });
+}
+
 // ---------- Lifecycle ----------
 // Runs once on first publish; the sender is whoever published (the CLI identity).
 export const init = db.init(ctx => {
@@ -424,6 +457,7 @@ export const setPhase = db.reducer({ incidentId: t.u64(), phase: t.string() }, (
   timeline(ctx, incidentId, 'phase_change', `${inc.phase} -> ${phase}`);
   addGuidedTasks(ctx, incidentId, phase);
   audit(ctx, 'set_phase', `${incidentId}: ${phase}`);
+  execUpdate(ctx, incidentId);
 });
 
 export const addTimelineEvent = db.reducer(
@@ -542,7 +576,10 @@ function setNotice(ctx: Ctx, incidentId: bigint, notice: string, label: string, 
   if (existing) ctx.db.notifyStatus.id.update({ ...row, id: existing.id });
   else ctx.db.notifyStatus.insert({ ...row, id: 0n });
   timeline(ctx, incidentId, 'action', `Notice ${status === 'sent' ? 'sent' : status === 'drafted' ? 'drafted' : 'reopened'}: ${label}`);
-  if (status === 'sent') audit(ctx, 'notice_sent', label);
+  if (status === 'sent') {
+    audit(ctx, 'notice_sent', label);
+    execUpdate(ctx, incidentId); // Lane B: post a status line to #exec
+  }
 }
 
 export const setNotifyStatus = db.reducer(
@@ -755,6 +792,7 @@ const DRILL: { waitSec: number; run: (ctx: Ctx, id: bigint) => void }[] = [
       for (const [st, n] of [['TX', 8_140n], ['CA', 2_960n], ['FL', 880n], ['NY', 410n], ['OK', 110n]] as const)
         setStateRecords(ctx, id, st, n);
       setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 's3://avon-exports', label: 'Customer PII export', status: 'exfiltrated', recordsCount: 12_500n });
+      execUpdate(ctx, id);
     },
   },
   { waitSec: 10, run: (ctx, id) => raiseAlert(ctx, { incidentId: id, accountRef: 'CHK-4471', transferRef: 'TX-90211', amountCents: 240_000n, reason: 'New payee, 02:41 AM' }) },

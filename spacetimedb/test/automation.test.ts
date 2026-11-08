@@ -61,6 +61,31 @@ test('drill creates an incident and schedules steps; clients cannot fire steps t
   expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.drillStep.iter()])).toHaveLength(0);
 });
 
+const execMessages = (h: ReturnType<typeof setup>) =>
+  h.withReducerTx(as('admin'), ctx => {
+    const exec = [...ctx.db.channel.iter()].find(c => c.incidentId === 1n && c.name === 'exec')!;
+    return [...ctx.db.message.iter()].filter(m => m.channelId === exec.id).map(m => m.text);
+  });
+
+test('changing phase posts a plain status update in #exec', () => {
+  const h = setup();
+  h.withReducerTx(as('admin'), ctx => mod.setPhase(ctx, { incidentId: 1n, phase: 'analyze' }));
+  expect(execMessages(h)).toEqual(['Status update — Phase: Analyze']);
+});
+
+test('exec update includes stolen records, deadline and frozen money', () => {
+  const h = setup();
+  h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, scope('exfiltrated', 12_500n)));
+  h.withReducerTx(as('admin'), ctx =>
+    mod.raiseFraudAlert(ctx, { incidentId: 1n, accountRef: 'A', transferRef: 'T', amountCents: 1_500_000n, reason: 'r' }));
+  h.withReducerTx(as('admin'), ctx => mod.setPhase(ctx, { incidentId: 1n, phase: 'contain' }));
+  const [msg] = execMessages(h);
+  expect(msg).toContain('Phase: Contain');
+  expect(msg).toContain('12,500 records stolen');
+  expect(msg).toMatch(/next deadline in 1d 12h|next deadline in 1d 11h/);
+  expect(msg).toContain('$15,000 frozen');
+});
+
 test('state impact upserts per state and rejects bad codes', () => {
   const h = setup();
   h.withReducerTx(as('admin'), ctx => mod.setStateImpact(ctx, { incidentId: 1n, state: 'tx', records: 10n }));
