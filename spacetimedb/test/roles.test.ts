@@ -49,6 +49,37 @@ test('admin can remove a member, who then sees nothing; responders cannot remove
   expect(() => h.withReducerTx(as('admin'), ctx => mod.removeMember(ctx, { target: ctx.sender }))).toThrow(/last admin/);
 });
 
+test('need to know: money for leadership, record counts for leadership + legal, systems for everyone', () => {
+  const h = setup();
+  const legalId = h.withReducerTx(as('legal'), ctx => ctx.sender);
+  h.withReducerTx(as('owner'), ctx => mod.addMember(ctx, { target: legalId, name: 'legal', email: 'legal@t', role: 'legal' }));
+  h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, { incidentId: 1n, assetType: 'system', assetRef: 'db', label: 'Core DB', status: 'exfiltrated', recordsCount: 500n }));
+  h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, { incidentId: 1n, assetType: 'account', assetRef: 'acc', label: 'Account CHK-1 (Jane)', status: 'exfiltrated', recordsCount: 1n }));
+  h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, { incidentId: 1n, accountRef: 'CHK-1', transferRef: 'T', amountCents: 250_000n, reason: 'r' }));
+  const view = (sub: string, v: unknown) => (v as (ctx: any) => any[])(h.viewContext(as(sub)));
+  const texts = (sub: string) => view(sub, mod.timelineEvents).map((e: any) => e.text).join('\n');
+
+  for (const sub of ['admin', 'exec_viewer']) expect(view(sub, mod.fraudAlerts)).toHaveLength(1);
+  for (const sub of ['responder', 'legal']) expect(view(sub, mod.fraudAlerts)).toHaveLength(0);
+  expect(view('legal', mod.legalClocks).length).toBeGreaterThan(0);
+  expect(view('responder', mod.legalClocks)).toHaveLength(0);
+  // responders: systems only, no counts, no account rows; no money or counts in the timeline
+  expect(view('responder', mod.scopeItems).map((s: any) => [s.assetRef, s.recordsCount])).toEqual([['db', 0n]]);
+  expect(texts('responder')).not.toMatch(/\$|records stolen|fraud|Jane/i);
+  expect(texts('legal')).toMatch(/records stolen/);
+  expect(texts('legal')).not.toMatch(/fraud/i);
+  // #exec is leadership only; exec viewers read the audit log but still not #legal
+  const names = (sub: string) => view(sub, mod.channels).map((c: any) => c.name).sort();
+  expect(names('responder')).toEqual(['containment', 'general']);
+  expect(names('exec_viewer')).toEqual(['containment', 'exec', 'general']);
+  expect(view('exec_viewer', mod.auditEntries).length).toBeGreaterThan(0);
+  // only leads decide on fraud
+  const alertId = h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()][0].id);
+  expect(() => h.withReducerTx(as('responder'), ctx => mod.setFraudAlertStatus(ctx, { alertId, status: 'frozen' }))).toThrow(/Requires role/);
+  const exec = h.withReducerTx(as('admin'), ctx => [...ctx.db.channel.iter()].find(c => c.name === 'exec')!.id);
+  expect(() => h.withReducerTx(as('responder'), ctx => mod.sendMessage(ctx, { channelId: exec, text: 'hi' }))).toThrow(/leadership/);
+});
+
 test('last admin cannot demote themselves', () => {
   const h = setup();
   expect(() => h.withReducerTx(as('admin'), ctx => mod.setRole(ctx, { target: ctx.sender, role: 'responder' }))).toThrow(/last admin/);

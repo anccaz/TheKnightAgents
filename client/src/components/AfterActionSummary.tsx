@@ -2,7 +2,7 @@
 import { useTable } from 'spacetimedb/react';
 import { tables } from '@/module_bindings';
 import { useNotices } from '@/components/NotifyPriorityChart';
-import { PHASES, PHASE_LABEL } from '@/components/shared';
+import { PHASES, PHASE_LABEL, SEE_ALL, SEE_RECORDS, can, useMe } from '@/components/shared';
 
 type Incident = { id: bigint; detectedAt: { toDate(): Date }; phase: string; title: string };
 
@@ -36,6 +36,8 @@ export default function AfterActionSummary({ incident }: { incident: Incident })
   const [statuses] = useTable(tables.notifyStatuses);
   const [members] = useTable(tables.members);
   const notices = useNotices(incident.id);
+  const me = useMe();
+  const money$ = can(me, SEE_ALL), records$ = can(me, SEE_RECORDS); // need to know: same split as the server views
   const id = incident.id;
   const now = Date.now();
 
@@ -98,9 +100,9 @@ export default function AfterActionSummary({ incident }: { incident: Incident })
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Tile label="Total time" value={dur(endMs - start)} sub={`${reached.length} of ${PHASES.length} phases`} />
         <Tile label="Time to contain" value={containMs == null ? 'Not yet' : dur(containMs)} sub="detected to Contain" />
-        <Tile label="Records stolen" value={records('exfiltrated').toLocaleString()} sub={`${systems} systems hit`} />
-        <Tile label="Money frozen" value={money(frozenCents)} sub={`${autoFrozen.length} auto, ${humanFrozen.length} by a person`} />
-        <Tile label="Notices sent" value={`${sent.length} / ${notices.length}`} sub={`${onTime} on time${overdue ? `, ${overdue} overdue` : ''}`} />
+        {records$ ? <Tile label="Records stolen" value={records('exfiltrated').toLocaleString()} sub={`${systems} systems hit`} /> : <Tile label="Systems hit" value={String(systems)} />}
+        {money$ && <Tile label="Money frozen" value={money(frozenCents)} sub={`${autoFrozen.length} auto, ${humanFrozen.length} by a person`} />}
+        {records$ && <Tile label="Notices sent" value={`${sent.length} / ${notices.length}`} sub={`${onTime} on time${overdue ? `, ${overdue} overdue` : ''}`} />}
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -121,16 +123,28 @@ export default function AfterActionSummary({ incident }: { incident: Incident })
         </div>
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">Locked by ransomware</dt>
-          <dd className="font-mono tabular-nums">{records('encrypted').toLocaleString()} records</dd>
-          <dt className="text-muted-foreground">Seen by attacker</dt>
-          <dd className="font-mono tabular-nums">{records('accessed').toLocaleString()} records</dd>
-          <dt className="text-muted-foreground">Fraud alerts</dt>
-          <dd className="font-mono tabular-nums">
-            {fa.length} total · {fa.filter(a => a.status === 'dismissed').length} dismissed · {fa.filter(a => a.status === 'open').length} open
-          </dd>
-          <dt className="text-muted-foreground">Legal deadlines</dt>
-          <dd className="font-mono tabular-nums">{ic.filter(c => c.done).length} of {ic.length} filed</dd>
+          {records$ && (
+            <>
+              <dt className="text-muted-foreground">Locked by ransomware</dt>
+              <dd className="font-mono tabular-nums">{records('encrypted').toLocaleString()} records</dd>
+              <dt className="text-muted-foreground">Seen by attacker</dt>
+              <dd className="font-mono tabular-nums">{records('accessed').toLocaleString()} records</dd>
+            </>
+          )}
+          {money$ && (
+            <>
+              <dt className="text-muted-foreground">Fraud alerts</dt>
+              <dd className="font-mono tabular-nums">
+                {fa.length} total · {fa.filter(a => a.status === 'dismissed').length} dismissed · {fa.filter(a => a.status === 'open').length} open
+              </dd>
+            </>
+          )}
+          {records$ && (
+            <>
+              <dt className="text-muted-foreground">Legal deadlines</dt>
+              <dd className="font-mono tabular-nums">{ic.filter(c => c.done).length} of {ic.length} filed</dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Tasks</dt>
           <dd className="font-mono tabular-nums">{it.filter(t => t.done).length} of {it.length} done</dd>
           <dt className="text-muted-foreground">Who did the work</dt>

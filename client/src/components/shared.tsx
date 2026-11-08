@@ -43,6 +43,9 @@ export function useMe() {
 export const LEADS = ['admin', 'incident_lead'];
 export const WRITERS = ['admin', 'incident_lead', 'responder'];
 export const PRIVILEGED = ['admin', 'incident_lead', 'legal'];
+// Need to know (mirrors the server views): money and fraud for leadership; record counts and deadlines also for legal.
+export const SEE_ALL = ['admin', 'exec_viewer', 'incident_lead'];
+export const SEE_RECORDS = [...SEE_ALL, 'legal'];
 export const can = (me: { role: string } | undefined, roles: string[]) => !!me && roles.includes(me.role);
 
 // Two-person tasks (Remove threat, Recover). Keep in sync with SIGNOFF_TASKS in spacetimedb/src/index.ts.

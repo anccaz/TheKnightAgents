@@ -12,7 +12,23 @@ const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 const SCOPE_STATUSES = ['encrypted', 'exfiltrated', 'accessed', 'unknown', 'clear'] as const;
 const FRAUD_STATUSES = ['open', 'frozen', 'dismissed'] as const;
 const NOTICE_STATUSES = ['not_started', 'drafted', 'sent'] as const;
-const PRIVILEGED_ROLES = ['admin', 'incident_lead', 'legal'];
+const PRIVILEGED_ROLES = ['admin', 'incident_lead', 'legal']; // #legal: lawyers + CISO-level leads only
+// Need to know. Everything about money (fraud, frozen totals, #exec status lines, Nessie accounts): leadership only.
+const SEE_ALL = ['admin', 'exec_viewer', 'incident_lead'];
+// How many records were stolen, legal deadlines, notices by state: leadership + legal. Responders see systems, not counts.
+const SEE_RECORDS = [...SEE_ALL, 'legal'];
+const AUDIT_READERS = ['admin', 'exec_viewer'];
+const EXEC_CHANNEL = 'exec';
+
+/** Timeline lines that carry money or record counts, hidden from roles without need to know.
+ *  shortcut: matches on text, since timeline rows have no sensitivity column; add one if new sensitive lines appear. */
+const MONEY_TEXT = /\$\d|fraud|froze/i;
+const RECORDS_TEXT = /\d[\d,]*\s+records?\b|records stolen|customers in \d|^Account /i; // "Account CHK-1 (Jane Doe)" names a customer
+function visibleTimeline(role: string, text: string) {
+  if (!SEE_ALL.includes(role) && MONEY_TEXT.test(text)) return false;
+  if (!SEE_RECORDS.includes(role) && RECORDS_TEXT.test(text)) return false;
+  return true;
+}
 
 // Every table is private. Clients read only through the views at the bottom,
 // which return nothing to non-members and filter by role.
@@ -722,6 +738,7 @@ export const sendMessage = db.reducer({ channelId: t.u64(), text: t.string() }, 
   const ch = ctx.db.channel.id.find(channelId);
   if (!ch) throw new SenderError('No such channel');
   if (ch.privileged && !PRIVILEGED_ROLES.includes(me.role)) throw new SenderError('Privileged channel');
+  if (ch.name === EXEC_CHANNEL && !SEE_ALL.includes(me.role)) throw new SenderError('#exec is for leadership only');
   if (!text.trim()) throw new SenderError('Empty message');
   ctx.db.message.insert({ id: 0n, channelId, sender: ctx.sender, text, sentAt: ctx.timestamp });
 });
@@ -756,7 +773,7 @@ export const raiseFraudAlert = db.reducer(
 );
 
 export const setFraudAlertStatus = db.reducer({ alertId: t.u64(), status: t.string() }, (ctx, { alertId, status }) => {
-  requireRole(ctx, ...WRITERS);
+  requireRole(ctx, 'incident_lead'); // freezing customer money is a lead's decision
   oneOf(status, FRAUD_STATUSES, 'fraud status');
   const a = ctx.db.fraudAlert.id.find(alertId);
   if (!a) throw new SenderError('No such alert');
@@ -1029,7 +1046,7 @@ const NESSIE_HOT_BALANCE = 75_000; // seed-nessie.mjs funds its live --plant tar
 
 export const importFromNessie = db.procedure({ incidentId: t.u64() }, t.string(), (ctx, { incidentId }) => {
   const { offset, checkedBefore, flagged } = ctx.withTx(tx => {
-    requireRole(tx, ...WRITERS);
+    requireRole(tx, 'incident_lead');
     requireIncident(tx, incidentId);
     const flaggedAccounts = new Set([...tx.db.scopeItem.incidentId.filter(incidentId)].filter(s => s.assetType === 'account').map(s => s.assetRef));
     const cur = tx.db.nessieCursor.incidentId.find(incidentId);
@@ -1133,18 +1150,21 @@ function advisorFacts(ctx: Ctx, inc: IncidentRow, role: string, noticesJson: str
   ];
   const tasks = [...ctx.db.task.incidentId.filter(id)].map(t => ({ tag: `K${t.id}`, id: `${t.id}`, title: t.title, phase: t.phase, done: t.done }));
   for (const t of tasks) lines.push(`[${t.tag}] Task (${label(t.phase)}, ${t.done ? 'done' : 'open'}): ${clip(t.title, 120)}`);
-  for (const e of [...ctx.db.timelineEvent.incidentId.filter(id)].sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 15).reverse())
+  const seeAll = SEE_ALL.includes(role), seeRecords = SEE_RECORDS.includes(role);
+  for (const e of [...ctx.db.timelineEvent.incidentId.filter(id)].filter(e => visibleTimeline(role, e.text)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 15).reverse())
     lines.push(`[T${e.id}] Timeline, ${ago(e.at)}, ${e.kind}: ${clip(e.text, 160)}`);
   for (const sc of ctx.db.scopeItem.incidentId.filter(id))
-    lines.push(`[S${sc.id}] What was hit: ${clip(sc.label, 80)} (${sc.assetType}) is ${SCOPE_WORDS[sc.status] ?? sc.status}, ${sc.recordsCount.toLocaleString()} records`);
-  const alerts = [...ctx.db.fraudAlert.incidentId.filter(id)].map(a => ({
+    if (seeRecords) lines.push(`[S${sc.id}] What was hit: ${clip(sc.label, 80)} (${sc.assetType}) is ${SCOPE_WORDS[sc.status] ?? sc.status}, ${sc.recordsCount.toLocaleString()} records`);
+    else if (sc.assetType === 'system') lines.push(`[S${sc.id}] What was hit: ${clip(sc.label, 80)} is ${SCOPE_WORDS[sc.status] ?? sc.status}`);
+  if (!seeAll) lines.push('[I2] This role does not see fraud alerts, money or #exec; leads and executives do.');
+  const alerts = [...ctx.db.fraudAlert.incidentId.filter(id)].filter(() => seeAll).map(a => ({
     tag: `F${a.id}`, id: `${a.id}`, status: a.status,
     label: `$${(a.amountCents / 100n).toLocaleString()} from account ${clip(a.accountRef, 30)}`, reason: clip(a.reason, 80),
   }));
   for (const a of alerts) lines.push(`[${a.tag}] Fraud alert (${a.status}): ${a.label}, ${a.reason}`);
-  const clocks = [...ctx.db.legalClock.incidentId.filter(id)].map(c => ({ tag: `D${c.id}`, id: `${c.id}`, label: clip(c.label, 80), done: c.done, msLeft: msOf(c.deadlineAt) }));
+  const clocks = [...ctx.db.legalClock.incidentId.filter(id)].filter(() => seeRecords).map(c => ({ tag: `D${c.id}`, id: `${c.id}`, label: clip(c.label, 80), done: c.done, msLeft: msOf(c.deadlineAt) }));
   for (const c of clocks) lines.push(`[${c.tag}] Deadline: ${c.label}, ${c.done ? 'filed' : `due ${left(c.msLeft)}`}`);
-  for (const st of ctx.db.stateImpact.incidentId.filter(id))
+  for (const st of [...ctx.db.stateImpact.incidentId.filter(id)].filter(() => seeRecords))
     lines.push(`[A${st.id}] Stolen records by state: ${st.state} has ${st.records.toLocaleString()} affected residents`);
 
   // Notices owed come from the client's notice list (state rules live there); status always comes from our tables.
@@ -1157,7 +1177,7 @@ function advisorFacts(ctx: Ctx, inc: IncidentRow, role: string, noticesJson: str
     parsed = [];
   }
   const notices: AdvisorFacts['notices'] = [];
-  for (const n of Array.isArray(parsed) ? parsed.slice(0, 30) : []) {
+  for (const n of Array.isArray(parsed) && seeRecords ? parsed.slice(0, 30) : []) {
     const key = clip(String((n as { key?: unknown })?.key ?? ''), 60);
     if (!NOTICE_KEY.test(key) || notices.some(x => x.key === key)) continue;
     const dueMs = Number((n as { dueMs?: unknown })?.dueMs);
@@ -1169,7 +1189,9 @@ function advisorFacts(ctx: Ctx, inc: IncidentRow, role: string, noticesJson: str
   }
 
   const privileged = PRIVILEGED_ROLES.includes(role);
-  const channels = new Map([...ctx.db.channel.incidentId.filter(id)].filter(c => privileged || !c.privileged).map(c => [c.id, c.name]));
+  const channels = new Map(
+    [...ctx.db.channel.incidentId.filter(id)].filter(c => (privileged || !c.privileged) && (seeAll || c.name !== EXEC_CHANNEL)).map(c => [c.id, c.name])
+  );
   const names = new Map([...ctx.db.user.iter()].map(u => [u.identity.toHexString(), u.name]));
   const msgs = [...ctx.db.message.iter()].filter(m => channels.has(m.channelId)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 10).reverse();
   for (const m of msgs)
@@ -1394,35 +1416,43 @@ export const members = db.view({ name: 'members', public: true }, t.array(user.r
 export const incidents = db.view({ name: 'incidents', public: true }, t.array(incident.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.incident.iter()] : []
 );
-export const timelineEvents = db.view({ name: 'timelineEvents', public: true }, t.array(timelineEvent.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.timelineEvent.iter()] : []
-);
-export const scopeItems = db.view({ name: 'scopeItems', public: true }, t.array(scopeItem.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.scopeItem.iter()] : []
-);
+export const timelineEvents = db.view({ name: 'timelineEvents', public: true }, t.array(timelineEvent.rowType), ctx => {
+  const role = roleOf(ctx);
+  return role ? [...ctx.db.timelineEvent.iter()].filter(e => visibleTimeline(role, e.text)) : [];
+});
+// Responders see which systems were hit, not how many records, and not customer/account rows (they carry names).
+export const scopeItems = db.view({ name: 'scopeItems', public: true }, t.array(scopeItem.rowType), ctx => {
+  const role = roleOf(ctx);
+  if (!role) return [];
+  if (SEE_RECORDS.includes(role)) return [...ctx.db.scopeItem.iter()];
+  return [...ctx.db.scopeItem.iter()].filter(sc => sc.assetType === 'system').map(sc => ({ ...sc, recordsCount: 0n }));
+});
 export const tasks = db.view({ name: 'tasks', public: true }, t.array(task.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.task.iter()] : []
 );
-export const channels = db.view({ name: 'channels', public: true }, t.array(channel.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.channel.iter()] : []
-);
+const canReadChannel = (role: string, ch: { privileged: boolean; name: string } | null | undefined) =>
+  !!ch && (!ch.privileged || PRIVILEGED_ROLES.includes(role)) && (ch.name !== EXEC_CHANNEL || SEE_ALL.includes(role));
+export const channels = db.view({ name: 'channels', public: true }, t.array(channel.rowType), ctx => {
+  const role = roleOf(ctx);
+  return role ? [...ctx.db.channel.iter()].filter(c => canReadChannel(role, c)) : [];
+});
 export const messages = db.view({ name: 'messages', public: true }, t.array(message.rowType), ctx => {
   const role = roleOf(ctx);
   if (!role) return [];
-  if (PRIVILEGED_ROLES.includes(role)) return [...ctx.db.message.iter()];
-  return [...ctx.db.message.iter()].filter(m => !ctx.db.channel.id.find(m.channelId)?.privileged);
+  return [...ctx.db.message.iter()].filter(m => canReadChannel(role, ctx.db.channel.id.find(m.channelId)));
 });
+const has = (ctx: VCtx, roles: string[]) => roles.includes(roleOf(ctx) ?? '');
 export const legalClocks = db.view({ name: 'legalClocks', public: true }, t.array(legalClock.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.legalClock.iter()] : []
+  has(ctx, SEE_RECORDS) ? [...ctx.db.legalClock.iter()] : []
 );
 export const fraudAlerts = db.view({ name: 'fraudAlerts', public: true }, t.array(fraudAlert.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.fraudAlert.iter()] : []
+  has(ctx, SEE_ALL) ? [...ctx.db.fraudAlert.iter()] : []
 );
 export const stateImpacts = db.view({ name: 'stateImpacts', public: true }, t.array(stateImpact.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.stateImpact.iter()] : []
+  has(ctx, SEE_RECORDS) ? [...ctx.db.stateImpact.iter()] : []
 );
 export const notifyStatuses = db.view({ name: 'notifyStatuses', public: true }, t.array(notifyStatus.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.notifyStatus.iter()] : []
+  has(ctx, SEE_RECORDS) ? [...ctx.db.notifyStatus.iter()] : []
 );
 export const phaseAdvances = db.view({ name: 'phaseAdvances', public: true }, t.array(phaseAdvance.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.phaseAdvance.iter()] : []
@@ -1431,8 +1461,8 @@ export const signoffs = db.view({ name: 'signoffs', public: true }, t.array(sign
   roleOf(ctx) ? [...ctx.db.signoff.iter()] : []
 );
 export const nessieCursors = db.view({ name: 'nessieCursors', public: true }, t.array(nessieCursor.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.nessieCursor.iter()] : []
+  has(ctx, SEE_ALL) ? [...ctx.db.nessieCursor.iter()] : []
 );
 export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
-  roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []
+  has(ctx, AUDIT_READERS) ? [...ctx.db.auditLog.iter()] : []
 );

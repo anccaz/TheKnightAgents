@@ -6,7 +6,7 @@ import { BarChart3, Check, FilePlus, CircleHelp, Download, Eye, Lock, Play, Rada
 import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import AfterActionSummary from '@/components/AfterActionSummary';
-import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SCOPE_STATUSES, SEVERITIES, SIGNOFF_TASKS, SeverityChip, WRITERS, can, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
+import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SCOPE_STATUSES, SEE_ALL, SEE_RECORDS, SEVERITIES, SIGNOFF_TASKS, SeverityChip, WRITERS, can, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -57,7 +57,9 @@ export default function IncidentPage() {
   // Sections appear as the incident moves on, so each phase only shows what it needs.
   const at = PHASES.indexOf(incident.phase as (typeof PHASES)[number]);
   const reached = (p: (typeof PHASES)[number]) => at >= PHASES.indexOf(p);
-  const upcoming = ([['analyze', 'What was hit'], ['contain', 'Fraud decisions']] as const).filter(([p]) => !reached(p));
+  const upcoming = ([['analyze', 'What was hit'], ['contain', 'Fraud decisions']] as const).filter(
+    ([p, what]) => !reached(p) && (what !== 'Fraud decisions' || can(me, SEE_ALL))
+  );
   return (
     <div className="flex flex-col gap-6">
       <section className="glass flex flex-col gap-4 p-5">
@@ -90,7 +92,7 @@ export default function IncidentPage() {
         <Tasks incidentId={incident.id} phase={incident.phase} />
       </div>
       {reached('analyze') && <Scope incidentId={incident.id} />}
-      {reached('contain') && <Fraud incidentId={incident.id} phase={incident.phase} />}
+      {reached('contain') && can(me, SEE_ALL) && <Fraud incidentId={incident.id} phase={incident.phase} />}
       {upcoming.length > 0 && (
         <p className="text-sm text-muted-foreground">
           Coming up: {upcoming.map(([p, what]) => `${what} opens in ${PHASE_LABEL[p]}`).join(' · ')}
@@ -289,6 +291,8 @@ function DrillControls() {
  * Built from the timeline, what was hit and fraud alerts, which every member can see (the audit log is admin-only).
  */
 function Detections({ incidentId }: { incidentId: bigint }) {
+  const me = useMe();
+  const counts = can(me, SEE_RECORDS);
   const [users] = useTable(tables.members);
   const [events] = useTable(tables.timelineEvents);
   const [scope] = useTable(tables.scopeItems);
@@ -303,7 +307,7 @@ function Detections({ incidentId }: { incidentId: bigint }) {
     ...events.filter(e => e.incidentId === incidentId && e.kind === 'ioc').map(e => ({ key: `t${e.id}`, at: e.at.toDate(), kind: 'Security alert', text: e.text, from: source(e.actor), hot: true })),
     ...scope
       .filter(s => s.incidentId === incidentId && ['encrypted', 'exfiltrated', 'accessed'].includes(s.status))
-      .map(s => ({ key: `s${s.id}`, at: s.updatedAt.toDate(), kind: 'System hit', text: `${s.label}: ${SCOPE_LABEL[s.status]} (${s.recordsCount.toLocaleString()} records)`, from: source(s.updatedBy), hot: s.status !== 'accessed' })),
+      .map(s => ({ key: `s${s.id}`, at: s.updatedAt.toDate(), kind: 'System hit', text: `${s.label}: ${SCOPE_LABEL[s.status]}${counts ? ` (${s.recordsCount.toLocaleString()} records)` : ''}`, from: source(s.updatedBy), hot: s.status !== 'accessed' })),
     ...alerts
       .filter(a => a.incidentId === incidentId)
       .map(a => ({ key: `f${a.id}`, at: a.createdAt.toDate(), kind: 'Fraud', text: `${money(a.amountCents)} from ${a.accountRef}: ${a.reason}`, from: 'Fraud feed', hot: a.status === 'open' })),
@@ -346,7 +350,7 @@ function NessieImport({ incidentId }: { incidentId: bigint }) {
   const run = useRun();
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState<{ customers: number; states: number; accounts: number; checked: number; raised: number } | null>(null);
-  if (!can(me, WRITERS)) return null;
+  if (!can(me, LEADS)) return null;
   const cur = cursors.find(c => c.incidentId === incidentId);
   const click = () => {
     setBusy(true);
@@ -621,9 +625,11 @@ function Scope({ incidentId }: { incidentId: bigint }) {
     setPreset('');
   };
 
+  const counts = can(me, SEE_RECORDS);
   return (
     <Panel title="What was hit">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" aria-live="polite">
+      {!counts && <p className="text-sm text-muted-foreground">Which systems are hit and how. Record counts are shared with leads, legal and executives only.</p>}
+      <div className={cn('grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5', !counts && 'hidden')} aria-live="polite">
         {SCOPE_STATUSES.map(s => {
           const { Icon, cls } = SCOPE_STYLE[s];
           return (
@@ -644,7 +650,7 @@ function Scope({ incidentId }: { incidentId: bigint }) {
               <TableHead>Asset</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Records</TableHead>
+              {counts && <TableHead className="text-right">Records</TableHead>}
               {writer && <TableHead>Change status</TableHead>}
             </TableRow>
           </TableHeader>
@@ -657,7 +663,7 @@ function Scope({ incidentId }: { incidentId: bigint }) {
                 </TableCell>
                 <TableCell>{ASSET_TYPES[it.assetType] ?? it.assetType}</TableCell>
                 <TableCell><ScopeChip status={it.status} /></TableCell>
-                <TableCell className="text-right font-mono">{it.recordsCount.toLocaleString()}</TableCell>
+                {counts && <TableCell className="text-right font-mono">{it.recordsCount.toLocaleString()}</TableCell>}
                 {writer && (
                   <TableCell>
                     <Pick label={`Status for ${it.label}`} value={it.status} items={SCOPE_LABEL} onChange={st => save(it, st)} />
@@ -722,7 +728,7 @@ function Fraud({ incidentId, phase }: { incidentId: bigint; phase: string }) {
   const [allAlerts] = useTable(tables.fraudAlerts);
   const setFraudAlertStatus = useReducer(reducers.setFraudAlertStatus);
   const run = useRun();
-  const writer = can(me, WRITERS);
+  const writer = can(me, LEADS); // freezing customer money is a lead's decision
   const alerts = allAlerts.filter(a => a.incidentId === incidentId);
   const open = alerts.filter(a => a.status === 'open').sort((a, b) => (a.id < b.id ? 1 : -1));
   const frozen = alerts.filter(a => a.status === 'frozen');

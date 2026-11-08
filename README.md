@@ -159,6 +159,17 @@ Reruns never duplicate alerts (progress is in `scripts/import-state.json`, per s
 ## Architecture
 There is no app server. The browser talks to SpacetimeDB directly over a websocket.
 - **Reducers** are the only way to write. Each one checks the caller's role first, then calls shared helpers that apply the auto-rules (clocks, freeze, guided tasks, #exec updates) inside the same transaction.
+- **Need to know, enforced in the views** (the browser never receives what a role may not see; the advisor uses the same filter):
+
+  | | Admin | Exec | Incident lead | Responder | Legal |
+  |---|---|---|---|---|---|
+  | Phases, tasks, detections, systems hit | yes | yes | yes | yes | yes |
+  | Record counts, deadlines, notices by state | yes | yes | yes | no | yes |
+  | Fraud alerts, money frozen, Nessie accounts, #exec | yes | yes | yes | no | no |
+  | #legal (lawyers + CISO-level leads) | yes | no | yes | no | yes |
+  | Audit log (Team > Security events) | yes | yes | no | no | no |
+
+  Fraud decisions (Freeze / It's fine) and Import from Nessie are incident lead or admin only.
 - **Private tables + views.** Every table is private. Clients read only through views that return nothing to non-members, hide #legal from roles without privilege, and show the audit log to admins only.
 - **Scheduled drill.** Each drill step is a row in a scheduled table; SpacetimeDB runs the next step on time and rejects anyone calling it by hand.
 - **Live subscriptions.** Every screen is a subscription, so a change in one browser shows up in all of them instantly.

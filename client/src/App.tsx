@@ -25,7 +25,7 @@ const entered = () => {
 const PAGES = {
   incident: { label: 'Incident', Icon: ShieldAlert, Page: IncidentPage, adminOnly: false },
   feed: { label: 'Live Feed', Icon: Radio, Page: FeedPage, adminOnly: false },
-  team: { label: 'Team', Icon: Users, Page: TeamPage, adminOnly: true },
+  team: { label: 'Team', Icon: Users, Page: TeamPage, adminOnly: true }, // admins manage; execs read the audit log
 } as const;
 type PageKey = keyof typeof PAGES;
 
@@ -75,7 +75,7 @@ export default function App() {
   };
 
   const online = users.filter(u => u.online);
-  const visible = (Object.keys(PAGES) as PageKey[]).filter(k => !PAGES[k].adminOnly || me?.role === 'admin');
+  const visible = (Object.keys(PAGES) as PageKey[]).filter(k => !PAGES[k].adminOnly || me?.role === 'admin' || me?.role === 'exec_viewer');
   const current = visible.includes(page) ? page : 'incident';
   const { Page } = PAGES[current];
 

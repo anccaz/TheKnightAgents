@@ -321,6 +321,44 @@ export default function TeamPage() {
           ))}
         </div>
       </div>
+
+      <AuditLog entries={auditLogs} names={new Map(members.map(m => [m.identity.toHexString(), m.name]))} />
+    </div>
+  );
+}
+
+/** Security events: the append-only audit log (admins and executives). Nothing in the app can edit or delete it. */
+function AuditLog({ entries, names }: { entries: readonly { id: bigint; at: { toDate(): Date }; actor: Identity; action: string; detail: string }[]; names: Map<string, string> }) {
+  const [action, setAction] = useState('');
+  const actions = useMemo(() => [...new Set(entries.map(e => e.action))].sort(), [entries]);
+  const shown = [...entries].filter(e => !action || e.action === action).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 100);
+  return (
+    <div className="border border-border bg-card p-4 space-y-3 font-mono text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+        <h3 className="font-heading uppercase tracking-wider text-white text-xs font-bold">Security events ({entries.length})</h3>
+        <label className="flex items-center gap-2 text-zinc-400">
+          Action
+          <select value={action} onChange={e => setAction(e.target.value)} className="bg-black/60 border border-border px-2 py-1 text-xs text-white font-mono">
+            <option value="">All</option>
+            {actions.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="text-zinc-500">Append-only: every security-relevant action, who did it and when. No one in the app can edit or delete these.</p>
+      {shown.length === 0 ? (
+        <p className="text-zinc-500 italic">No events yet.</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {shown.map(e => (
+            <li key={e.id.toString()} className="flex flex-wrap gap-x-3 py-1.5">
+              <time className="text-zinc-500">{e.at.toDate().toLocaleString()}</time>
+              <span className="text-white">{names.get(e.actor.toHexString()) ?? 'System (drill, autopilot, timers)'}</span>
+              <span className="text-neon">{e.action}</span>
+              <span className="min-w-0 flex-1 break-words text-zinc-300">{e.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
