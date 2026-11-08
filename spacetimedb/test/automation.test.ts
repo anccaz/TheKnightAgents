@@ -107,6 +107,69 @@ test('notice status upserts, audits sends, and is blocked for viewers', () => {
   expect(() => h.withReducerTx(as('viewer'), set('sent'))).toThrow(/Requires role/);
 });
 
+// ---- Smart flow + autopilot
+const tasksOf = (h: ReturnType<typeof setup>, phase: string) =>
+  h.withReducerTx(as('admin'), ctx => [...ctx.db.task.iter()].filter(t => t.incidentId === 1n && t.phase === phase));
+const pendingAdvance = (h: ReturnType<typeof setup>) => h.withReducerTx(as('admin'), ctx => [...ctx.db.phaseAdvance.iter()]);
+const phaseOf = (h: ReturnType<typeof setup>, id = 1n) => h.withReducerTx(as('admin'), ctx => ctx.db.incident.id.find(id)!.phase);
+
+test('verifiable tasks tick themselves', () => {
+  const h = setup();
+  h.withReducerTx(as('admin'), ctx => mod.setPhase(ctx, { incidentId: 1n, phase: 'analyze' }));
+  const listTask = () => tasksOf(h, 'analyze').find(t => t.title.startsWith('List every affected'))!;
+  expect(listTask().done).toBe(false);
+  h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, scope('encrypted', 10n)));
+  expect(listTask().done).toBe(true);
+});
+
+test('finishing a phase schedules an advance; the schedule moves it; Stay here and reopening cancel it', () => {
+  const h = setup();
+  const tickAll = () => {
+    for (const t of tasksOf(h, 'detect')) if (!t.done) h.withReducerTx(as('admin'), ctx => mod.toggleTask(ctx, { taskId: t.id }));
+  };
+  tickAll();
+  expect(pendingAdvance(h)).toHaveLength(1);
+  // reopening a task cancels it
+  const first = tasksOf(h, 'detect')[0];
+  h.withReducerTx(as('admin'), ctx => mod.toggleTask(ctx, { taskId: first.id }));
+  expect(pendingAdvance(h)).toHaveLength(0);
+  h.withReducerTx(as('admin'), ctx => mod.toggleTask(ctx, { taskId: first.id }));
+  // Stay here cancels and holds
+  h.withReducerTx(as('admin'), ctx => mod.stayInPhase(ctx, { incidentId: 1n }));
+  expect(pendingAdvance(h)).toHaveLength(0);
+  h.withReducerTx(as('admin'), ctx => mod.addTimelineEvent(ctx, { incidentId: 1n, kind: 'note', text: 'more work' }));
+  expect(pendingAdvance(h)).toHaveLength(0); // held: no new countdown
+  // moving on manually clears the hold; finishing the next phase schedules again, and the schedule moves it
+  h.withReducerTx(as('admin'), ctx => mod.setPhase(ctx, { incidentId: 1n, phase: 'analyze' }));
+  h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, scope('exfiltrated', 10n))); // ticks list + clocks tasks
+  for (const t of tasksOf(h, 'analyze')) if (!t.done) h.withReducerTx(as('admin'), ctx => mod.toggleTask(ctx, { taskId: t.id }));
+  const row = pendingAdvance(h)[0];
+  expect(row.toPhase).toBe('contain');
+  expect(() => h.withReducerTx(as('admin'), ctx => mod.runPhaseAdvance(ctx, { row }))).toThrow(/schedule only/);
+  h.withReducerTx(TestAuth.internal(), ctx => mod.runPhaseAdvance(ctx, { row }));
+  expect(phaseOf(h)).toBe('contain');
+});
+
+test('autopilot drives an incident through all six phases', () => {
+  const h = setup();
+  h.withReducerTx(as('admin'), ctx => mod.startAutopilotDrill(ctx, {}));
+  const id = 2n;
+  // Run the attack script fully, then let autopilot ticks and scheduled advances play out.
+  for (let step = 0; step < 10; step++)
+    h.withReducerTx(TestAuth.internal(), ctx => mod.runDrillStep(ctx, { row: { scheduledId: 0n, scheduledAt: ScheduleAt.time(0n), incidentId: id, step } }));
+  for (let tick = 0; tick < 60 && phaseOf(h, id) !== 'post_incident'; tick++) {
+    h.withReducerTx(TestAuth.internal(), ctx => mod.runAutopilotStep(ctx, { row: { scheduledId: 0n, scheduledAt: ScheduleAt.time(0n), incidentId: id, tick } }));
+    for (const row of pendingAdvance(h).filter(r => r.incidentId === id)) h.withReducerTx(TestAuth.internal(), ctx => mod.runPhaseAdvance(ctx, { row }));
+  }
+  for (let tick = 0; tick < 6; tick++)
+    h.withReducerTx(TestAuth.internal(), ctx => mod.runAutopilotStep(ctx, { row: { scheduledId: 0n, scheduledAt: ScheduleAt.time(0n), incidentId: id, tick } }));
+  expect(phaseOf(h, id)).toBe('post_incident');
+  const done = h.withReducerTx(as('admin'), ctx => [...ctx.db.task.iter()].filter(t => t.incidentId === id).every(t => t.done));
+  expect(done).toBe(true);
+  const clocksFiled = h.withReducerTx(as('admin'), ctx => [...ctx.db.legalClock.iter()].filter(c => c.incidentId === id).every(c => c.done));
+  expect(clocksFiled).toBe(true);
+});
+
 test('SEC 8-K clock lands 4 business days out, never on a weekend', () => {
   const h = setup();
   h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, scope('exfiltrated', 100n)));

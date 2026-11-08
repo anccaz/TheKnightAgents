@@ -31,14 +31,15 @@ No app server. Browser <-> SpacetimeDB directly (websocket subscriptions + reduc
 spacetimedb/src/index.ts  (SpacetimeDB v2.14 TypeScript module = the data contract)
 - Tables (ALL PRIVATE): owner, user, incident, timelineEvent, scopeItem, task, channel, message, legalClock,
   fraudAlert, auditLog, stateImpact (stolen records per US state), notifyStatus (per-notice not_started/drafted/sent),
-  drillStep (scheduled table).
+  drillStep, phaseAdvance, autopilotStep (scheduled tables), phaseHold.
 - Views (the ONLY thing clients read; return [] to non-members): members, incidents, timelineEvents, scopeItems, tasks,
   channels, messages (#legal hidden unless admin/incident_lead/legal), legalClocks, fraudAlerts, stateImpacts,
-  notifyStatuses, auditEntries (admin only).
+  notifyStatuses, phaseAdvances, auditEntries (admin only).
 - Reducers: init (stores owner), onConnect/onDisconnect (online flag), addMember (admin or DB owner), setRole (blocks
   removing last admin), createIncident, setPhase, addTimelineEvent, addTask, toggleTask, sendMessage, upsertScopeItem,
   raiseFraudAlert, setFraudAlertStatus, startLegalClock, completeLegalClock, setStateImpact, setNotifyStatus,
-  startDrill, stopDrill, runDrillStep (scheduled; internal-only guard).
+  startDrill, stopDrill, runDrillStep, stayInPhase, runPhaseAdvance, startAutopilotDrill, runAutopilotStep
+  (run* = scheduled, internal-only guard).
 - Shared helpers (logic lives here; reducers check roles then call them): requireRole, requireIncident, audit,
   timeline, oneOf, newIncident, addGuidedTasks, startClock, autoLegalClocks, setScope, raiseAlert, setStateRecords.
 - Auto-rules: incident/phase change -> GUIDED tasks; scope status 'exfiltrated' -> LEGAL_RULES clocks (bank regulator 36h,
@@ -82,6 +83,11 @@ cyan (primary), magenta (danger), white/gray (neutral). Solid panels, no glows, 
   server-side role checks, last-admin guard, append-only audit log, Maincloud republished with the security fix.
 - Incident flow end to end, live across browsers; guided tasks; drill; auto legal clocks; auto-freeze.
 - Notice priority chart + per-notice drafted/sent status (audited).
+- Smart flow: AUTO_TASKS tick verifiable guided tasks; progress() schedules a phaseAdvance (30 s, 6 s for AUTOPILOT
+  incidents) when a phase's tasks are all done; stayInPhase holds (phaseHold table); runPhaseAdvance moves via
+  movePhase. Client: AutoAdvanceBanner with countdown + "Stay here".
+- Autopilot drill: startAutopilotDrill = attack DRILL + autopilotStep ticks (every 5 s, does the next open task of the
+  current phase, freezes open alerts, sends state customer notices, files clocks) through all 6 phases.
 - Cyberpunk UI (3 pages), fonts, background, calmer 3-color theme.
 - Lane A's annie branch merged into lane-b and main. lane-b may be ahead of main (notice status) - check git log.
 

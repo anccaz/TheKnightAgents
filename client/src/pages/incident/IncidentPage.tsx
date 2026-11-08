@@ -1,5 +1,5 @@
 // Lane B owner: the whole incident on one screen: declare, phase, record, tasks, what was hit, fraud decisions.
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useReducer, useTable } from 'spacetimedb/react';
 import { Check, CircleHelp, Download, Eye, Lock, Play, ShieldCheck, Snowflake, Square, ThumbsUp, Zap, type LucideIcon } from 'lucide-react';
 import { reducers, tables } from '@/module_bindings';
@@ -153,6 +153,7 @@ function PhaseStepper({ incidentId, phase }: { incidentId: bigint; phase: string
           </li>
         ))}
       </ol>
+      <AutoAdvanceBanner incidentId={incidentId} />
       {next && lead && (
         <Button size="lg" onClick={() => go(next, idx + 1)} className="h-auto min-h-12 self-start px-5 py-2 text-base font-bold whitespace-normal">
           Done with {PHASE_LABEL[phase]}: move to {PHASE_LABEL[next]} →
@@ -164,9 +165,40 @@ function PhaseStepper({ incidentId, phase }: { incidentId: bigint; phase: string
   );
 }
 
+/** "All tasks done: moving on in 27 s [Stay here]" while an automatic phase advance is pending. */
+function AutoAdvanceBanner({ incidentId }: { incidentId: bigint }) {
+  const me = useMe();
+  const [advances] = useTable(tables.phaseAdvances);
+  const stayInPhase = useReducer(reducers.stayInPhase);
+  const run = useRun();
+  const [, setTick] = useState(0); // re-render every half second while counting down
+  const pending = advances.find(a => a.incidentId === incidentId);
+  useEffect(() => {
+    if (!pending) return;
+    const t = setInterval(() => setTick(n => n + 1), 500);
+    return () => clearInterval(t);
+  }, [pending]);
+  if (!pending) return null;
+  const secs = Math.max(0, Math.ceil((pending.at.toDate().getTime() - Date.now()) / 1000));
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-primary bg-primary/10 px-4 py-3">
+      <span className="font-mono text-2xl font-bold text-primary tabular-nums">{secs}s</span>
+      <span className="min-w-0 flex-1">
+        All {PHASE_LABEL[pending.fromPhase]} tasks are done. Moving to <b>{PHASE_LABEL[pending.toPhase]}</b> automatically.
+      </span>
+      {can(me, LEADS) && (
+        <Button variant="outline" onClick={() => run(stayInPhase({ incidentId }), `Staying in ${PHASE_LABEL[pending.fromPhase]}`)}>
+          Stay here
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function DrillControls() {
   const me = useMe();
   const startDrill = useReducer(reducers.startDrill);
+  const startAutopilotDrill = useReducer(reducers.startAutopilotDrill);
   const stopDrill = useReducer(reducers.stopDrill);
   const run = useRun();
   if (!can(me, LEADS)) return null;
@@ -179,6 +211,16 @@ function DrillControls() {
         onClick={() => window.confirm('Start a live attack drill? A scripted attack plays out over ~90 seconds.') && run(startDrill(), 'Drill started')}
       >
         <Play /> Run 2 AM drill
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() =>
+          window.confirm('Start an autopilot drill? The attack and the whole response play out on their own (about 3 minutes).') &&
+          run(startAutopilotDrill(), 'Autopilot drill started')
+        }
+      >
+        <Zap /> Autopilot
       </Button>
       <Button type="button" variant="outline" onClick={() => run(stopDrill(), 'Drill stopped')}>
         <Square /> Stop drill

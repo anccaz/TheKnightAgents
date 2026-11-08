@@ -16,6 +16,11 @@ Drill timing to know (from `DRILL` in `spacetimedb/src/index.ts`, seconds after 
 
 ---
 
+## Hands-free option
+If you are presenting alone or want a looping screen, click **Autopilot** instead of Run 2 AM drill: the attack and the whole response play out on their own (about 3 minutes, all six phases). Narrate over it: "Every task you see ticking off is either verified by the system or done the way a responder would; phases advance themselves after a countdown the lead can stop."
+
+For the real-incident story, show the 30-second banner after the Detect tasks are done and click **Stay here** once: "Automation moves the team forward, but the lead always has the final say."
+
 ## Setup before judging
 - [ ] Maincloud republished from the latest `main` (`cd spacetimedb && npm run publish:cloud`), members re-added if data was wiped.
 - [ ] Browser A logged in as **admin**, on the **Incident** tab.

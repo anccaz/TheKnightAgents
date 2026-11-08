@@ -22,6 +22,14 @@ export const AuditLog = __t.object("AuditLog", {
 });
 export type AuditLog = __Infer<typeof AuditLog>;
 
+export const AutopilotStep = __t.object("AutopilotStep", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  incidentId: __t.u64(),
+  tick: __t.u32(),
+});
+export type AutopilotStep = __Infer<typeof AutopilotStep>;
+
 export const Channel = __t.object("Channel", {
   id: __t.u64(),
   incidentId: __t.u64(),
@@ -117,6 +125,25 @@ export const Owner = __t.object("Owner", {
   identity: __t.identity(),
 });
 export type Owner = __Infer<typeof Owner>;
+
+export const PhaseAdvance = __t.object("PhaseAdvance", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  incidentId: __t.u64(),
+  fromPhase: __t.string(),
+  toPhase: __t.string(),
+  at: __t.timestamp(),
+});
+export type PhaseAdvance = __Infer<typeof PhaseAdvance>;
+
+export const PhaseAdvances = __t.object("PhaseAdvances", {});
+export type PhaseAdvances = __Infer<typeof PhaseAdvances>;
+
+export const PhaseHold = __t.object("PhaseHold", {
+  incidentId: __t.u64(),
+  phase: __t.string(),
+});
+export type PhaseHold = __Infer<typeof PhaseHold>;
 
 export const ScopeItem = __t.object("ScopeItem", {
   id: __t.u64(),
