@@ -182,7 +182,7 @@ export default function TeamPage() {
     try {
       const cleanHex = newId.trim().replace(/^0x/, '');
       const parsedIdentity = Identity.fromString(cleanHex);
-      await run(() => addMemberCall({ identity: parsedIdentity, name: newName.trim(), email: newEmail.trim(), role: newRole }));
+      run(addMemberCall({ target: parsedIdentity, name: newName.trim(), email: newEmail.trim(), role: newRole }), `${newName.trim()} added`);
       setNewId('');
       setNewName('');
       setNewEmail('');
@@ -192,7 +192,7 @@ export default function TeamPage() {
   };
 
   const handleRoleChange = async (memberIdentity: Identity, role: string) => {
-    await run(() => setRoleCall({ identity: memberIdentity, role }));
+    run(setRoleCall({ target: memberIdentity, role }), 'Role updated');
   };
 
   return (
