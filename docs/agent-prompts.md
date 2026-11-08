@@ -86,6 +86,10 @@ cyan (primary), magenta (danger), white/gray (neutral). Solid panels, no glows, 
 - Smart flow: AUTO_TASKS tick verifiable guided tasks; progress() schedules a phaseAdvance (30 s, 6 s for AUTOPILOT
   incidents) when a phase's tasks are all done; stayInPhase holds (phaseHold table); runPhaseAdvance moves via
   movePhase. Client: AutoAdvanceBanner with countdown + "Stay here".
+- Incident advisor: askAdvisor procedure (spacetimedb/src/advisor.ts holds the pure, tested checks: citation stripping,
+  action validation, server-built labels, rule-based fallback) + logAdvisorAction; client AdvisorWidget (launcher
+  bottom-left, chat bottom-right, ConfirmActionPage = second confirmation). Shared geminiGenerate helper used by both
+  draftNotice and askAdvisor. Toasts moved to top-right.
 - Autopilot drill: startAutopilotDrill = attack DRILL + autopilotStep ticks (every 5 s, does the next open task of the
   current phase, freezes open alerts, sends state customer notices, files clocks) through all 6 phases.
 - Cyberpunk UI (3 pages), fonts, background, calmer 3-color theme.

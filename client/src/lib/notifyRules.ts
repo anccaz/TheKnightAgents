@@ -30,6 +30,17 @@ export const RULES: Record<string, StateRule> = {
   // whenever any NY resident is notified; credit bureaus (8)(b) if >5,000 NY residents. DFS-covered entities
   // (a NY-chartered/licensed bank) must also tell DFS within 72 hours under 23 NYCRR 500.17.
   NY: { name: 'New York', customerDays: 30, agMin: 1, agDays: null, craMin: 5_000, craDays: null, note: 'Also notify Dept. of State and State Police; DFS within 72h if DFS-licensed' },
+  // States with a Winstead PC office (Atlanta, Charlotte, Nashville; TX and NY above). From memory of the statutes, NOT yet
+  // checked against the text: Legal must verify before relying on these.
+  // O.C.G.A. 10-1-912: residents in the most expedient time possible, without unreasonable delay; no AG notice;
+  // credit bureaus if more than 10,000 residents.
+  GA: { name: 'Georgia', customerDays: null, agMin: null, agDays: null, craMin: 10_000, craDays: null, note: 'Unverified: check O.C.G.A. 10-1-912' },
+  // N.C.G.S. 75-65: without unreasonable delay; AG Consumer Protection Division whenever residents are notified;
+  // credit bureaus if more than 1,000.
+  NC: { name: 'North Carolina', customerDays: null, agMin: 1, agDays: null, craMin: 1_000, craDays: null, note: 'Unverified: check N.C.G.S. 75-65' },
+  // T.C.A. 47-18-2107: residents within 45 days of discovery; credit bureaus if more than 1,000. Since 2017 the statute
+  // does not apply to GLBA-covered financial institutions, so a bank may follow its federal guidance instead.
+  TN: { name: 'Tennessee', customerDays: 45, agMin: null, agDays: null, craMin: 1_000, craDays: null, note: 'Unverified; banks covered by GLBA may be exempt' },
 };
 
 // States we have not checked: timing is usually "without unreasonable delay". 1,000 is the most common

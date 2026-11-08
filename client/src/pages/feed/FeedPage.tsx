@@ -4,7 +4,7 @@ import { useReducer, useTable } from 'spacetimedb/react';
 import { Lock, Send, Hash, CheckCircle2, AlertTriangle, Clock, Plus, ChevronDown } from 'lucide-react';
 import { reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
-import { NoIncident, PHASE_LABEL, PRIVILEGED, SCOPE_LABEL, WRITERS, can, useCurrentIncident, useMe } from '@/components/shared';
+import { NoIncident, PHASE_LABEL, PRIVILEGED, SCOPE_LABEL, SEE_RECORDS, WRITERS, can, useCurrentIncident, useMe } from '@/components/shared';
 import NotifyPriorityChart from '@/components/NotifyPriorityChart';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -143,12 +143,19 @@ export default function FeedPage() {
 
   return (
     <section className="flex flex-col gap-4">
-      <NotifyPriorityChart incidentId={incident.id} />
+      {!can(me, SEE_RECORDS) && (
+        <p className="glass p-3 text-sm text-muted-foreground">Who must be notified, legal deadlines and #exec are shared with leads, legal and executives only.</p>
+      )}
+      {can(me, SEE_RECORDS) && <NotifyPriorityChart incidentId={incident.id} />}
 
       {/* Deadlines */}
+      {can(me, SEE_RECORDS) && (
       <div className="glass p-3">
         <div className="mb-2 flex items-center gap-2">
           <h2 className=" font-heading text-sm font-bold tracking-widest text-white uppercase">Deadlines</h2>
+          <span className="text-xs text-muted-foreground" title="Bank regulator 36h (OCC/Fed/FDIC rule), SEC 8-K 4 business days if material (public companies), Texas AG 30 days at 250+ Texans, Texas customers 60 days. Clocks start when data is first marked stolen, our stand-in for when the bank determines the incident.">
+            Federal + Texas rules, simplified. Not legal advice: Legal confirms each one.
+          </span>
           <Button size="xs" variant="outline" className="ml-auto" aria-expanded={showForm} onClick={() => setShowForm(s => !s)}>
             {showForm ? <ChevronDown /> : <Plus />} Add a deadline
           </Button>
@@ -210,6 +217,7 @@ export default function FeedPage() {
           </form>
         )}
       </div>
+      )}
 
       {/* Feed */}
       <div className="glass flex flex-col gap-3 p-3">

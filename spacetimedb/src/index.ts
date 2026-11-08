@@ -2,6 +2,8 @@
 // Only Lane A edits table definitions; others ask A for new fields.
 import { schema, table, t, SenderError, ScheduleAt } from 'spacetimedb/server';
 import { Timestamp, TimeDuration } from 'spacetimedb';
+import { ADVISOR_SCHEMA, advisorPrompt, checkReply, left, ruleBasedReply, type AdvisorFacts } from './advisor';
+import { NESSIE_BASE, accountLabel, batch, countByState, isSuspicious, normalizeActivity, type Activity, type NessieAccount, type NessieCustomer } from './nessie';
 
 // ---------- Enums (kept as strings; validated in reducers) ----------
 const ROLES = ['admin', 'incident_lead', 'responder', 'legal', 'exec_viewer'] as const;
@@ -10,7 +12,23 @@ const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 const SCOPE_STATUSES = ['encrypted', 'exfiltrated', 'accessed', 'unknown', 'clear'] as const;
 const FRAUD_STATUSES = ['open', 'frozen', 'dismissed'] as const;
 const NOTICE_STATUSES = ['not_started', 'drafted', 'sent'] as const;
-const PRIVILEGED_ROLES = ['admin', 'incident_lead', 'legal'];
+const PRIVILEGED_ROLES = ['admin', 'incident_lead', 'legal']; // #legal: lawyers + CISO-level leads only
+// Need to know. Everything about money (fraud, frozen totals, #exec status lines, Nessie accounts): leadership only.
+const SEE_ALL = ['admin', 'exec_viewer', 'incident_lead'];
+// How many records were stolen, legal deadlines, notices by state: leadership + legal. Responders see systems, not counts.
+const SEE_RECORDS = [...SEE_ALL, 'legal'];
+const AUDIT_READERS = ['admin', 'exec_viewer'];
+const EXEC_CHANNEL = 'exec';
+
+/** Timeline lines that carry money or record counts, hidden from roles without need to know.
+ *  shortcut: matches on text, since timeline rows have no sensitivity column; add one if new sensitive lines appear. */
+const MONEY_TEXT = /\$\d|fraud|froze/i;
+const RECORDS_TEXT = /\d[\d,]*\s+records?\b|records stolen|customers in \d|^Account /i; // "Account CHK-1 (Jane Doe)" names a customer
+function visibleTimeline(role: string, text: string) {
+  if (!SEE_ALL.includes(role) && MONEY_TEXT.test(text)) return false;
+  if (!SEE_RECORDS.includes(role) && RECORDS_TEXT.test(text)) return false;
+  return true;
+}
 
 // Every table is private. Clients read only through the views at the bottom,
 // which return nothing to non-members and filter by role.
@@ -198,6 +216,31 @@ const autopilotStep = table(
   }
 );
 
+// Two-person sign-off on a task: one person does it, a different lead verifies it. The task is done only once verified.
+const signoff = table(
+  {},
+  {
+    taskId: t.u64().primaryKey(),
+    incidentId: t.u64().index(),
+    doneBy: t.identity(),
+    doneAt: t.timestamp(),
+    verifiedBy: t.identity().optional(),
+    verifiedAt: t.timestamp().optional(),
+  }
+);
+
+// Where the in-app Nessie import got to: each click scans the next batch of accounts (wrapping around).
+const nessieCursor = table(
+  {},
+  {
+    incidentId: t.u64().primaryKey(),
+    offset: t.u32(),
+    total: t.u32(), // accounts in Nessie at the last import
+    at: t.timestamp(),
+    checked: t.u32().default(0), // accounts checked so far (capped at total); last + default so existing rows migrate
+  }
+);
+
 // Pending steps of a running attack drill; each row fires runDrillStep at its time.
 const drillStep = table(
   {},
@@ -218,6 +261,8 @@ const db = schema(
     phaseAdvance,
     phaseHold,
     autopilotStep,
+    signoff,
+    nessieCursor,
     user,
     incident,
     timelineEvent,
@@ -236,6 +281,7 @@ const db = schema(
     env: {
       GEMINI_API_KEY: t.string().optional(),
       GEMINI_MODEL: t.string().optional(),
+      NESSIE_API_KEY: t.string().optional(), // Capital One Nessie, for the in-app "Import from Nessie" button
     },
   }
 );
@@ -296,7 +342,10 @@ const GUIDED: Record<string, string[]> = {
     'Scan again to confirm no backdoors are left',
   ],
   recover: [
-    'Restore systems from clean, tested backups',
+    'Rebuild affected servers from clean, tested backups',
+    'Verify cryptographic hashes of the rebuilt core banking container',
+    'Confirm EDR clean scan on all isolated hosts',
+    'Rotate enterprise service account keys',
     'Watch restored systems closely for 48 hours',
     'Send customer notices once Legal approves',
   ],
@@ -306,6 +355,18 @@ const GUIDED: Record<string, string[]> = {
     'Mark every legal deadline as filed',
   ],
 };
+
+// Tasks that need two people: one does it, a different incident lead or admin verifies it (Remove threat, Recover).
+const SIGNOFF_TASKS = new Set([
+  'Remove the malware and every attacker login',
+  'Patch the hole they came in through',
+  'Scan again to confirm no backdoors are left',
+  'Rebuild affected servers from clean, tested backups',
+  'Verify cryptographic hashes of the rebuilt core banking container',
+  'Confirm EDR clean scan on all isolated hosts',
+  'Rotate enterprise service account keys',
+]);
+const VERIFIERS = ['incident_lead']; // admins always pass requireRole
 
 // Started automatically the first time data is marked stolen (our stand-in for "the bank determined it").
 // NOT LEGAL ADVICE: checked against sources on 2026-11-07, Legal must re-verify before relying on them.
@@ -382,14 +443,34 @@ function setScope(ctx: Ctx, args: ScopeArgs) {
   if (args.status === 'exfiltrated') autoLegalClocks(ctx, args.incidentId);
 }
 
+// Freezing customer accounts is a containment decision: big transfers freeze automatically only once the
+// incident is in Contain (or later). Before that they are flagged and freeze the moment the team reaches Contain.
+const phaseIndex = (phase: string) => PHASES.indexOf(phase as (typeof PHASES)[number]);
+const containing = (ctx: Ctx, incidentId: bigint) => phaseIndex(ctx.db.incident.id.find(incidentId)?.phase ?? '') >= phaseIndex('contain');
+const dollars = (cents: bigint) => `$${(cents / 100n).toLocaleString()}`;
+
 type AlertArgs = { incidentId: bigint; accountRef: string; transferRef: string; amountCents: bigint; reason: string };
 function raiseAlert(ctx: Ctx, args: AlertArgs) {
-  const frozen = args.amountCents >= AUTO_FREEZE_CENTS;
+  const big = args.amountCents >= AUTO_FREEZE_CENTS;
+  const frozen = big && containing(ctx, args.incidentId);
   const a = ctx.db.fraudAlert.insert({ ...args, id: 0n, status: frozen ? 'frozen' : 'open', createdAt: ctx.timestamp });
   if (frozen) {
-    timeline(ctx, args.incidentId, 'auto', `Account ${args.accountRef} frozen: $${(args.amountCents / 100n).toLocaleString()} transfer over the $10,000 limit`);
+    timeline(ctx, args.incidentId, 'auto', `Account ${args.accountRef} frozen: ${dollars(args.amountCents)} transfer over the $10,000 limit`);
     audit(ctx, 'auto_freeze', `${a.id}: ${args.accountRef}`);
+  } else if (big)
+    timeline(ctx, args.incidentId, 'auto', `Fraud flagged on ${args.accountRef}: ${dollars(args.amountCents)} transfer. Freezes automatically when the team reaches Contain`);
+}
+
+/** On reaching Contain: freeze every open alert over the limit in one go. */
+function freezeOnContain(ctx: Ctx, incidentId: bigint) {
+  const due = [...ctx.db.fraudAlert.incidentId.filter(incidentId)].filter(a => a.status === 'open' && a.amountCents >= AUTO_FREEZE_CENTS);
+  if (!due.length) return;
+  for (const a of due) {
+    ctx.db.fraudAlert.id.update({ ...a, status: 'frozen' });
+    audit(ctx, 'auto_freeze', `${a.id}: ${a.accountRef}`);
   }
+  const total = due.reduce((n, a) => n + a.amountCents, 0n);
+  timeline(ctx, incidentId, 'auto', `Contain started: froze ${due.length} account${due.length === 1 ? '' : 's'} over the $10,000 limit (${dollars(total)}): ${due.map(a => a.accountRef).join(', ')}`);
 }
 
 // ---------- Exec status update: one plain-words line in the incident's #exec channel ----------
@@ -432,7 +513,10 @@ const AUTO_TASKS: Record<string, (ctx: Ctx, id: bigint) => boolean> = {
     [...ctx.db.timelineEvent.incidentId.filter(id)].some(e => e.kind === 'ioc' || (e.kind === 'note' && !e.text.startsWith('Incident declared'))),
   'List every affected system and customer in What was hit': (ctx, id) => [...ctx.db.scopeItem.incidentId.filter(id)].length > 0,
   'Confirm with Legal that the deadline clocks are right': (ctx, id) => [...ctx.db.legalClock.incidentId.filter(id)].length > 0,
-  'Review every fraud alert: freeze or dismiss': (ctx, id) => ![...ctx.db.fraudAlert.incidentId.filter(id)].some(a => a.status === 'open'),
+  'Review every fraud alert: freeze or dismiss': (ctx, id) => {
+    const alerts = [...ctx.db.fraudAlert.incidentId.filter(id)];
+    return alerts.length > 0 && !alerts.some(a => a.status === 'open');
+  },
   'Send customer notices once Legal approves': (ctx, id) => {
     const states = [...ctx.db.stateImpact.incidentId.filter(id)].filter(s => s.records > 0n);
     const sent = new Set([...ctx.db.notifyStatus.incidentId.filter(id)].filter(n => n.status === 'sent').map(n => n.notice));
@@ -444,8 +528,9 @@ const AUTO_TASKS: Record<string, (ctx: Ctx, id: bigint) => boolean> = {
   },
 };
 const ADVANCE_SEC = 30;
-const AUTOPILOT_ADVANCE_SEC = 6;
+const AUTOPILOT_ADVANCE_SEC = 3;
 const isAutopilot = (title: string) => title.startsWith('AUTOPILOT');
+const autopilotOn = (ctx: Ctx, incidentId: bigint) => [...ctx.db.autopilotStep.iter()].some(r => r.incidentId === incidentId);
 const nextPhase = (phase: string) => PHASES[PHASES.indexOf(phase as (typeof PHASES)[number]) + 1];
 
 function cancelAdvance(ctx: Ctx, incidentId: bigint, note?: string) {
@@ -472,7 +557,7 @@ function progress(ctx: Ctx, incidentId: bigint) {
     return;
   }
   if (pending.length || ctx.db.phaseHold.incidentId.find(incidentId)?.phase === inc.phase) return;
-  const secs = isAutopilot(inc.title) ? AUTOPILOT_ADVANCE_SEC : ADVANCE_SEC;
+  const secs = isAutopilot(inc.title) || autopilotOn(ctx, incidentId) ? AUTOPILOT_ADVANCE_SEC : ADVANCE_SEC;
   const at = new Timestamp(ctx.timestamp.microsSinceUnixEpoch + BigInt(secs) * 1_000_000n);
   ctx.db.phaseAdvance.insert({ scheduledId: 0n, scheduledAt: ScheduleAt.time(at.microsSinceUnixEpoch), incidentId, fromPhase: inc.phase, toPhase: to, at });
   timeline(ctx, incidentId, 'auto', `All ${PHASE_LABELS[inc.phase]} tasks done: moving to ${PHASE_LABELS[to]} in ${secs} s unless the lead stays`);
@@ -484,6 +569,7 @@ function movePhase(ctx: Ctx, incidentId: bigint, phase: string) {
   timeline(ctx, incidentId, 'phase_change', `${inc.phase} -> ${phase}`);
   addGuidedTasks(ctx, incidentId, phase);
   audit(ctx, 'set_phase', `${incidentId}: ${phase}`);
+  if (phaseIndex(phase) >= phaseIndex('contain')) freezeOnContain(ctx, incidentId);
   cancelAdvance(ctx, incidentId);
   const hold = ctx.db.phaseHold.incidentId.find(incidentId);
   if (hold && hold.phase !== phase) ctx.db.phaseHold.incidentId.delete(incidentId);
@@ -538,6 +624,17 @@ export const setRole = db.reducer({ target: t.identity(), role: t.string() }, (c
     throw new SenderError('Cannot remove the last admin');
   ctx.db.user.identity.update({ ...u, role });
   audit(ctx, 'set_role', `${u.email} -> ${role}`);
+});
+
+/** Revoke access at once (e.g. a responder's laptop is compromised mid-incident). Their views go empty immediately. */
+export const removeMember = db.reducer({ target: t.identity() }, (ctx, { target }) => {
+  requireRole(ctx, 'admin');
+  const u = ctx.db.user.identity.find(target);
+  if (!u) throw new SenderError('No such user');
+  if (u.role === 'admin' && [...ctx.db.user.iter()].filter(x => x.role === 'admin').length === 1)
+    throw new SenderError('Cannot remove the last admin');
+  ctx.db.user.identity.delete(target);
+  audit(ctx, 'remove_member', `${u.email} (${u.role}) removed`);
 });
 
 // ---------- Incidents & timeline (Lane B) ----------
@@ -600,7 +697,38 @@ export const toggleTask = db.reducer({ taskId: t.u64() }, (ctx, { taskId }) => {
   requireRole(ctx, ...WRITERS);
   const tk = ctx.db.task.id.find(taskId);
   if (!tk) throw new SenderError('No such task');
+  if (SIGNOFF_TASKS.has(tk.title)) throw new SenderError('This task needs a sign-off: mark it done, then a different lead verifies it');
   ctx.db.task.id.update({ ...tk, done: !tk.done });
+  progress(ctx, tk.incidentId);
+});
+
+/**
+ * Two-person rule. First call: a responder or lead says "I did it". Second call: a DIFFERENT incident lead or admin
+ * verifies it, and only then is the task done. The person who did it can withdraw before it is verified.
+ */
+export const signOffTask = db.reducer({ taskId: t.u64() }, (ctx, { taskId }) => {
+  const me = requireRole(ctx, ...WRITERS);
+  const tk = ctx.db.task.id.find(taskId);
+  if (!tk) throw new SenderError('No such task');
+  if (!SIGNOFF_TASKS.has(tk.title)) throw new SenderError('This task does not need a sign-off');
+  const so = ctx.db.signoff.taskId.find(taskId);
+  if (!so) {
+    ctx.db.signoff.insert({ taskId, incidentId: tk.incidentId, doneBy: ctx.sender, doneAt: ctx.timestamp, verifiedBy: undefined, verifiedAt: undefined });
+    timeline(ctx, tk.incidentId, 'action', `${me.name} marked done, waiting for verification: ${tk.title}`);
+    audit(ctx, 'signoff_done', `${taskId}: ${tk.title}`);
+  } else if (so.verifiedBy) {
+    throw new SenderError('Already verified');
+  } else if (so.doneBy.isEqual(ctx.sender)) {
+    ctx.db.signoff.taskId.delete(taskId); // withdraw before anyone verified it
+    timeline(ctx, tk.incidentId, 'action', `${me.name} withdrew their sign-off: ${tk.title}`);
+    audit(ctx, 'signoff_withdrawn', `${taskId}: ${tk.title}`);
+  } else {
+    requireRole(ctx, ...VERIFIERS);
+    ctx.db.signoff.taskId.update({ ...so, verifiedBy: ctx.sender, verifiedAt: ctx.timestamp });
+    ctx.db.task.id.update({ ...tk, done: true });
+    timeline(ctx, tk.incidentId, 'action', `${me.name} verified: ${tk.title}`);
+    audit(ctx, 'signoff_verified', `${taskId}: ${tk.title}`);
+  }
   progress(ctx, tk.incidentId);
 });
 
@@ -610,6 +738,7 @@ export const sendMessage = db.reducer({ channelId: t.u64(), text: t.string() }, 
   const ch = ctx.db.channel.id.find(channelId);
   if (!ch) throw new SenderError('No such channel');
   if (ch.privileged && !PRIVILEGED_ROLES.includes(me.role)) throw new SenderError('Privileged channel');
+  if (ch.name === EXEC_CHANNEL && !SEE_ALL.includes(me.role)) throw new SenderError('#exec is for leadership only');
   if (!text.trim()) throw new SenderError('Empty message');
   ctx.db.message.insert({ id: 0n, channelId, sender: ctx.sender, text, sentAt: ctx.timestamp });
 });
@@ -644,7 +773,7 @@ export const raiseFraudAlert = db.reducer(
 );
 
 export const setFraudAlertStatus = db.reducer({ alertId: t.u64(), status: t.string() }, (ctx, { alertId, status }) => {
-  requireRole(ctx, ...WRITERS);
+  requireRole(ctx, 'incident_lead'); // freezing customer money is a lead's decision
   oneOf(status, FRAUD_STATUSES, 'fraud status');
   const a = ctx.db.fraudAlert.id.find(alertId);
   if (!a) throw new SenderError('No such alert');
@@ -768,50 +897,22 @@ type ThinkingConfig = { thinkingBudget: number } | { thinkingLevel: string } | n
 const THINKING_OPTIONS: ThinkingConfig[] = [{ thinkingBudget: 0 }, { thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }, null];
 const THINKING_OK = new Map<string, ThinkingConfig>();
 
-export const draftNotice = db.procedure(
-  { incidentId: t.u64(), notice: t.string(), label: t.string(), people: t.u64(), rule: t.string(), due: t.string() },
-  t.string(),
-  (ctx, args) => {
-    const notice = clip(args.notice, 80), label = clip(args.label, 120), rule = clip(args.rule, 200), due = clip(args.due, 60);
+type GeminiRes = { ok: boolean; status: number; json(): any };
+type HttpCtx = { http: { fetch(url: string, init?: any): any } };
 
-    // 1. Check access and gather facts in a read transaction.
-    const facts = ctx.withTx(tx => {
-      requireRole(tx, ...PRIVILEGED_ROLES); // the draft goes into privileged #legal
-      const inc = requireIncident(tx, args.incidentId);
-      const stolen = [...tx.db.scopeItem.incidentId.filter(args.incidentId)].filter(s => s.status === 'exfiltrated');
-      return {
-        title: inc.title,
-        kind: inc.kind,
-        detected: fmtDate(inc.detectedAt),
-        stolen: stolen.map(s => `${s.label} (${s.recordsCount.toLocaleString()} records)`).join('; ') || 'not yet confirmed',
-      };
-    });
-
-    const key = ctx.env.GEMINI_API_KEY;
-    if (!key) throw new SenderError('AI drafting is off: publish the module with GEMINI_API_KEY set (see README).');
-    const model = ctx.env.GEMINI_MODEL || null; // unset = pick the newest stable Flash this key can use
-
-    // 2. Ask Gemini (outside any transaction: HTTP is not allowed inside withTx).
-    const prompt = [
-      'You are drafting a data breach notification for a US bank. Write the full letter, ready for a lawyer to review.',
-      `Recipient: ${label}. Who must be told and when: ${rule}; deadline ${due}.`,
-      `People affected: ${args.people.toLocaleString()}.`,
-      `Incident: ${facts.title} (${facts.kind}), detected ${facts.detected}.`,
-      `Data stolen: ${facts.stolen}.`,
-      'Include what the law for this recipient requires: what happened and when, what personal information was involved,',
-      'what the bank is doing, what the reader can do (credit freeze, fraud alert, free credit reports, the major credit bureaus\' contact details),',
-      'and a contact phone number and address. Use [BRACKETS] for any fact you do not know; never invent one.',
-      'Plain language, no markdown, under 350 words. Put "DRAFT - PRIVILEGED & CONFIDENTIAL - NOT LEGAL ADVICE" on the first line.',
-    ].join('\n');
-
+/**
+ * One Gemini text generation with model fallback, retries and short timeouts (shared by AI drafts and the advisor).
+ * Returns text = null when Gemini is busy or down; throws SenderError on setup problems (bad key, quota).
+ */
+function geminiGenerate(ctx: HttpCtx, key: string, model: string | null, prompt: string, config: Record<string, unknown>, tag: string) {
     // Speed: no "thinking" (a form letter does not need it), a capped length, a short per-call timeout and an overall
     // budget, so a click answers in seconds. If a model rejects the thinking setting (HTTP 400), retry it once without.
     const body = (thinking: ThinkingConfig) =>
       JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 1200, ...(thinking ? { thinkingConfig: thinking } : {}) },
+        generationConfig: { ...config, ...(thinking ? { thinkingConfig: thinking } : {}) },
       });
-    type Res = { ok: boolean; status: number; json(): any };
+    type Res = GeminiRes;
     const call = (m: string, thinking: ThinkingConfig): Res => {
       try {
         return ctx.http.fetch(`${GEMINI_API}/models/${encodeURIComponent(m)}:generateContent`, {
@@ -860,7 +961,7 @@ export const draftNotice = db.procedure(
       usedModel = m;
       res = generate(m);
       calls++;
-      console.log(`draftNotice: ${m} -> HTTP ${res.status}`);
+      console.log(`${tag}: ${m} -> HTTP ${res.status}`);
       if (res.ok) {
         lastGoodModel = m;
         break;
@@ -875,10 +976,50 @@ export const draftNotice = db.procedure(
       throw new SenderError(`Gemini request failed (HTTP ${res.status}, model ${usedModel}). Check the API key and quota.`);
     const data = res?.ok ? (res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] }) : null;
     const aiText = data?.candidates?.[0]?.content?.parts?.map(p => p.text ?? '').join('').trim();
+    return { text: aiText || null, usedModel, tried: [...tried] };
+}
+
+export const draftNotice = db.procedure(
+  { incidentId: t.u64(), notice: t.string(), label: t.string(), people: t.u64(), rule: t.string(), due: t.string() },
+  t.string(),
+  (ctx, args) => {
+    const notice = clip(args.notice, 80), label = clip(args.label, 120), rule = clip(args.rule, 200), due = clip(args.due, 60);
+
+    // 1. Check access and gather facts in a read transaction.
+    const facts = ctx.withTx(tx => {
+      requireRole(tx, ...PRIVILEGED_ROLES); // the draft goes into privileged #legal
+      const inc = requireIncident(tx, args.incidentId);
+      const stolen = [...tx.db.scopeItem.incidentId.filter(args.incidentId)].filter(s => s.status === 'exfiltrated');
+      return {
+        title: inc.title,
+        kind: inc.kind,
+        detected: fmtDate(inc.detectedAt),
+        stolen: stolen.map(s => `${s.label} (${s.recordsCount.toLocaleString()} records)`).join('; ') || 'not yet confirmed',
+      };
+    });
+
+    const key = ctx.env.GEMINI_API_KEY;
+    if (!key) throw new SenderError('AI drafting is off: publish the module with GEMINI_API_KEY set (see README).');
+    const model = ctx.env.GEMINI_MODEL || null; // unset = pick the newest stable Flash this key can use
+
+    // 2. Ask Gemini (outside any transaction: HTTP is not allowed inside withTx).
+    const prompt = [
+      'You are drafting a data breach notification for a US bank. Write the full letter, ready for a lawyer to review.',
+      `Recipient: ${label}. Who must be told and when: ${rule}; deadline ${due}.`,
+      `People affected: ${args.people.toLocaleString()}.`,
+      `Incident: ${facts.title} (${facts.kind}), detected ${facts.detected}.`,
+      `Data stolen: ${facts.stolen}.`,
+      'Include what the law for this recipient requires: what happened and when, what personal information was involved,',
+      'what the bank is doing, what the reader can do (credit freeze, fraud alert, free credit reports, the major credit bureaus\' contact details),',
+      'and a contact phone number and address. Use [BRACKETS] for any fact you do not know; never invent one.',
+      'Plain language, no markdown, under 350 words. Put "DRAFT - PRIVILEGED & CONFIDENTIAL - NOT LEGAL ADVICE" on the first line.',
+    ].join('\n');
+
+    const { text: aiText, usedModel, tried } = geminiGenerate(ctx, key, model, prompt, { temperature: 0.3, maxOutputTokens: 1200 }, 'draftNotice');
     const draft = aiText || templateNotice({ label, rule, due, people: args.people, ...facts });
     const header = aiText
       ? `AI draft (${usedModel}) for ${label}, review before sending:`
-      : `Template draft for ${label} (Gemini unavailable: ${[...tried].join(', ') || 'no model'}), review and fill the [BRACKETS]:`;
+      : `Template draft for ${label} (Gemini unavailable: ${tried.join(', ') || 'no model'}), review and fill the [BRACKETS]:`;
 
     // 3. Post into #legal and mark the notice drafted, atomically.
     ctx.withTx(tx => {
@@ -895,6 +1036,215 @@ export const draftNotice = db.procedure(
     return draft;
   }
 );
+
+
+// ---------- Import from Nessie (Capital One): the bank's real customer and transaction data, in one click ----------
+// Same rules as scripts/import-nessie.mjs. Procedures make HTTP calls one at a time, so each click scans a batch of
+// accounts (plus the "hot" ones: live-demo targets and accounts already flagged) and remembers where it stopped.
+const NESSIE_BATCH = 20;
+const NESSIE_HOT_BALANCE = 75_000; // seed-nessie.mjs funds its live --plant targets to at least this
+
+export const importFromNessie = db.procedure({ incidentId: t.u64() }, t.string(), (ctx, { incidentId }) => {
+  const { offset, checkedBefore, flagged } = ctx.withTx(tx => {
+    requireRole(tx, 'incident_lead');
+    requireIncident(tx, incidentId);
+    const flaggedAccounts = new Set([...tx.db.scopeItem.incidentId.filter(incidentId)].filter(s => s.assetType === 'account').map(s => s.assetRef));
+    const cur = tx.db.nessieCursor.incidentId.find(incidentId);
+    return { offset: cur?.offset ?? 0, checkedBefore: cur?.checked ?? 0, flagged: flaggedAccounts };
+  });
+  let key: string | undefined;
+  try {
+    key = ctx.env.NESSIE_API_KEY;
+  } catch {
+    key = undefined;
+  }
+  if (!key) throw new SenderError('Nessie is off: publish the module with NESSIE_API_KEY set (see README).');
+
+  // GET a Nessie list. The URL carries the key, so errors only ever name the path.
+  const get = (path: string): any[] => {
+    let r: { ok: boolean; status: number; json(): any };
+    try {
+      r = ctx.http.fetch(`${NESSIE_BASE}${path}?key=${encodeURIComponent(key!)}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        timeout: TimeDuration.fromMillis(10_000),
+      });
+    } catch {
+      throw new SenderError(`Nessie did not answer (${path})`);
+    }
+    if (r.status === 404 || (r.status === 400 && path.endsWith('/bills'))) return []; // "none found" / old bills
+    if (!r.ok) throw new SenderError(`Nessie ${path} returned HTTP ${r.status}`);
+    const j = r.json();
+    return Array.isArray(j) ? j : [];
+  };
+
+  const customers = get('/customers') as NessieCustomer[];
+  if (!customers.length) throw new SenderError('No customers in Nessie yet: run scripts/seed-nessie.mjs first.');
+  const accounts = (get('/accounts') as NessieAccount[]).sort((a, b) => (a._id < b._id ? -1 : 1));
+  const names = new Map(customers.map(c => [c._id, `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim()]));
+  const { picked, next } = batch(accounts, offset, NESSIE_BATCH);
+  const hot = accounts.filter(a => (a.balance ?? 0) >= NESSIE_HOT_BALANCE || flagged.has(a._id));
+  const toScan = [...new Map([...hot, ...picked].map(a => [a._id, a])).values()];
+  const found: { a: NessieAccount; item: Activity; reason: string }[] = [];
+  for (const a of toScan)
+    for (const kind of ['withdrawal', 'bill'] as const)
+      for (const raw of get(`/accounts/${a._id}/${kind}s`)) {
+        const item = normalizeActivity(kind, raw);
+        const reason = isSuspicious(item);
+        if (reason) found.push({ a, item, reason });
+      }
+
+  const result = ctx.withTx(tx => {
+    const states = countByState(customers);
+    for (const [st, n] of states) setStateRecords(tx, incidentId, st, BigInt(n));
+    const total = BigInt(customers.length);
+    const agg = [...tx.db.scopeItem.incidentId.filter(incidentId)].find(sc => sc.assetRef === 'nessie-customers');
+    if (!agg || agg.recordsCount !== total || agg.status !== 'exfiltrated')
+      setScope(tx, { incidentId, assetType: 'customer', assetRef: 'nessie-customers', label: 'Customer records (Nessie, First Avon Bank)', status: 'exfiltrated', recordsCount: total });
+    const seen = new Set([...tx.db.fraudAlert.incidentId.filter(incidentId)].map(f => f.transferRef));
+    let raised = 0;
+    for (const f of found) {
+      const ref = `${f.item.kind}:${f.item.ref}`;
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      const label = accountLabel(f.a);
+      setScope(tx, { incidentId, assetType: 'account', assetRef: f.a._id, label: `Account ${label} (${names.get(f.a.customer_id ?? '') || 'customer'})`, status: 'exfiltrated', recordsCount: 1n });
+      raiseAlert(tx, { incidentId, accountRef: label, transferRef: ref, amountCents: BigInt(Math.round(f.item.amount * 100)), reason: f.reason });
+      raised++;
+    }
+    const row = { incidentId, offset: next, total: accounts.length, at: tx.timestamp, checked: Math.min(accounts.length, checkedBefore + picked.length) };
+    if (tx.db.nessieCursor.incidentId.find(incidentId)) tx.db.nessieCursor.incidentId.update(row);
+    else tx.db.nessieCursor.insert(row);
+    const from = accounts.length ? (offset % accounts.length) + 1 : 0;
+    timeline(tx, incidentId, 'auto', `Nessie import: ${customers.length} customers in ${states.size} states; checked ${toScan.length} accounts (batch from #${from} of ${accounts.length}); ${raised} new fraud alert(s)`);
+    execUpdate(tx, incidentId);
+    progress(tx, incidentId);
+    return { customers: customers.length, states: states.size, accounts: accounts.length, checked: toScan.length, from, raised };
+  });
+  return JSON.stringify(result);
+});
+
+// ---------- Incident advisor (Gemini, grounded): answers from the live record, proposes checked actions ----------
+const SCOPE_WORDS: Record<string, string> = {
+  encrypted: 'locked by ransomware', exfiltrated: 'stolen', accessed: 'seen by attacker', unknown: 'not checked yet', clear: 'safe',
+};
+const NOTICE_KEY = /^(?:[A-Z]{2}-(?:Customers|Attorney General|Credit bureaus)|clock-\d+)$/;
+type IncidentRow = NonNullable<ReturnType<Ctx['db']['incident']['id']['find']>>;
+
+/** Everything the advisor may know, as citable lines, filtered by the asker's role (no #legal for non-lawyers). */
+function advisorFacts(ctx: Ctx, inc: IncidentRow, role: string, noticesJson: string): AdvisorFacts {
+  const id = inc.id;
+  const nowMs = Number(ctx.timestamp.microsSinceUnixEpoch / 1000n);
+  const msOf = (ts: Timestamp) => Number(ts.microsSinceUnixEpoch / 1000n) - nowMs;
+  const ago = (ts: Timestamp) => {
+    const m = Math.max(0, Math.round(-msOf(ts) / 60_000));
+    return m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
+  };
+  const label = (p: string) => PHASE_LABELS[p] ?? p;
+  const next = nextPhase(inc.phase);
+  const lines = [
+    `[I] Incident "${clip(inc.title, 120)}"; severity ${inc.severity}; type ${inc.kind}; current phase ${label(inc.phase)}; detected ${ago(inc.detectedAt)}.`,
+    `[P] Playbook: phases in order ${PHASES.map(label).join(' > ')}. ` +
+      (next ? `When every ${label(inc.phase)} task is done, the incident moves to ${label(next)} after a 30-second countdown unless the lead stays. ` : 'This is the last phase. ') +
+      'Fraud transfers of $10,000 or more are frozen automatically once the incident reaches Contain. Remove threat and Recover tasks need one person to mark them done and a different incident lead to verify them. Marking data stolen starts the federal deadline clocks (bank regulator 36h, SEC 8-K if material).',
+  ];
+  const tasks = [...ctx.db.task.incidentId.filter(id)].map(t => ({ tag: `K${t.id}`, id: `${t.id}`, title: t.title, phase: t.phase, done: t.done }));
+  for (const t of tasks) lines.push(`[${t.tag}] Task (${label(t.phase)}, ${t.done ? 'done' : 'open'}): ${clip(t.title, 120)}`);
+  const seeAll = SEE_ALL.includes(role), seeRecords = SEE_RECORDS.includes(role);
+  for (const e of [...ctx.db.timelineEvent.incidentId.filter(id)].filter(e => visibleTimeline(role, e.text)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 15).reverse())
+    lines.push(`[T${e.id}] Timeline, ${ago(e.at)}, ${e.kind}: ${clip(e.text, 160)}`);
+  for (const sc of ctx.db.scopeItem.incidentId.filter(id))
+    if (seeRecords) lines.push(`[S${sc.id}] What was hit: ${clip(sc.label, 80)} (${sc.assetType}) is ${SCOPE_WORDS[sc.status] ?? sc.status}, ${sc.recordsCount.toLocaleString()} records`);
+    else if (sc.assetType === 'system') lines.push(`[S${sc.id}] What was hit: ${clip(sc.label, 80)} is ${SCOPE_WORDS[sc.status] ?? sc.status}`);
+  if (!seeAll) lines.push('[I2] This role does not see fraud alerts, money or #exec; leads and executives do.');
+  const alerts = [...ctx.db.fraudAlert.incidentId.filter(id)].filter(() => seeAll).map(a => ({
+    tag: `F${a.id}`, id: `${a.id}`, status: a.status,
+    label: `$${(a.amountCents / 100n).toLocaleString()} from account ${clip(a.accountRef, 30)}`, reason: clip(a.reason, 80),
+  }));
+  for (const a of alerts) lines.push(`[${a.tag}] Fraud alert (${a.status}): ${a.label}, ${a.reason}`);
+  const clocks = [...ctx.db.legalClock.incidentId.filter(id)].filter(() => seeRecords).map(c => ({ tag: `D${c.id}`, id: `${c.id}`, label: clip(c.label, 80), done: c.done, msLeft: msOf(c.deadlineAt) }));
+  for (const c of clocks) lines.push(`[${c.tag}] Deadline: ${c.label}, ${c.done ? 'filed' : `due ${left(c.msLeft)}`}`);
+  for (const st of [...ctx.db.stateImpact.incidentId.filter(id)].filter(() => seeRecords))
+    lines.push(`[A${st.id}] Stolen records by state: ${st.state} has ${st.records.toLocaleString()} affected residents`);
+
+  // Notices owed come from the client's notice list (state rules live there); status always comes from our tables.
+  const sent = new Map([...ctx.db.notifyStatus.incidentId.filter(id)].map(n => [n.notice, n.status]));
+  const clockDone = new Map(clocks.map(c => [`clock-${c.id}`, c.done]));
+  let parsed: unknown = [];
+  try {
+    parsed = JSON.parse(noticesJson.slice(0, 6000));
+  } catch {
+    parsed = [];
+  }
+  const notices: AdvisorFacts['notices'] = [];
+  for (const n of Array.isArray(parsed) && seeRecords ? parsed.slice(0, 30) : []) {
+    const key = clip(String((n as { key?: unknown })?.key ?? ''), 60);
+    if (!NOTICE_KEY.test(key) || notices.some(x => x.key === key)) continue;
+    const dueMs = Number((n as { dueMs?: unknown })?.dueMs);
+    const status = clockDone.get(key) ? 'sent' : (sent.get(key) ?? 'not_started');
+    const item = { tag: `Q${notices.length + 1}`, key, label: clip(String((n as { label?: unknown })?.label ?? key), 80), status, msLeft: Number.isFinite(dueMs) && dueMs > 0 ? dueMs - nowMs : null };
+    notices.push(item);
+    const people = Number((n as { people?: unknown })?.people) || 0;
+    lines.push(`[${item.tag}] Notice owed to ${item.label}: ${people.toLocaleString()} people, due ${left(item.msLeft)}, status ${status.replace('_', ' ')}`);
+  }
+
+  const privileged = PRIVILEGED_ROLES.includes(role);
+  const channels = new Map(
+    [...ctx.db.channel.incidentId.filter(id)].filter(c => (privileged || !c.privileged) && (seeAll || c.name !== EXEC_CHANNEL)).map(c => [c.id, c.name])
+  );
+  const names = new Map([...ctx.db.user.iter()].map(u => [u.identity.toHexString(), u.name]));
+  const msgs = [...ctx.db.message.iter()].filter(m => channels.has(m.channelId)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 10).reverse();
+  for (const m of msgs)
+    lines.push(`[M${m.id}] Chat #${channels.get(m.channelId)}, ${names.get(m.sender.toHexString()) ?? 'Knight Agent'}: ${clip(m.text, 160)}`);
+
+  return { lines, phase: inc.phase, phases: PHASES, phaseLabels: PHASE_LABELS, tasks, alerts, clocks, notices };
+}
+
+export const askAdvisor = db.procedure(
+  { incidentId: t.u64(), question: t.string(), history: t.string(), notices: t.string() },
+  t.string(),
+  (ctx, args) => {
+    const question = clip(args.question, 500).trim();
+    if (!question) throw new SenderError('Ask a question first');
+    const facts = ctx.withTx(tx => {
+      const me = requireRole(tx);
+      return advisorFacts(tx, requireIncident(tx, args.incidentId), me.role, args.notices);
+    });
+    let key: string | undefined;
+    let model: string | null = null;
+    try {
+      key = ctx.env.GEMINI_API_KEY;
+      model = ctx.env.GEMINI_MODEL || null;
+    } catch {
+      key = undefined; // no environment (e.g. unit tests): answer from rules
+    }
+    if (!key) return JSON.stringify(ruleBasedReply(facts, 'AI is not configured on this server'));
+    const prompt = advisorPrompt(facts, question, args.history.slice(0, 2000));
+    let res: { text: string | null; usedModel: string };
+    try {
+      res = geminiGenerate(ctx, key, model, prompt, { temperature: 0.1, maxOutputTokens: 900, responseMimeType: 'application/json', responseSchema: ADVISOR_SCHEMA }, 'askAdvisor');
+    } catch {
+      return JSON.stringify(ruleBasedReply(facts, 'Gemini rejected the request'));
+    }
+    if (!res.text) return JSON.stringify(ruleBasedReply(facts, 'Gemini is busy'));
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(res.text);
+    } catch {
+      parsed = null;
+    }
+    return JSON.stringify(checkReply(parsed, facts, res.usedModel) ?? ruleBasedReply(facts, 'the AI answer was unusable'));
+  }
+);
+
+/** After a human confirms an advisor suggestion and it succeeds: keep "AI-suggested, human-confirmed" on the record. */
+export const logAdvisorAction = db.reducer({ incidentId: t.u64(), label: t.string() }, (ctx, { incidentId, label }) => {
+  const me = requireRole(ctx);
+  requireIncident(ctx, incidentId);
+  const text = clip(label, 200);
+  timeline(ctx, incidentId, 'action', `Advisor suggestion confirmed by ${me.name}: ${text}`);
+  audit(ctx, 'advisor_action', text);
+});
 
 // ---------- Attack drill: a scripted attack that plays out live ----------
 // Each step runs `waitSec` after the previous one. Events go through the same helpers
@@ -913,7 +1263,7 @@ const DRILL: { waitSec: number; run: (ctx: Ctx, id: bigint) => void }[] = [
     waitSec: 8,
     run: (ctx, id) => {
       // Who lives where, as the Nessie importer would report it from customer addresses.
-      for (const [st, n] of [['TX', 8_140n], ['CA', 2_960n], ['FL', 880n], ['NY', 410n], ['OK', 110n]] as const)
+      for (const [st, n] of [['TX', 7_400n], ['CA', 2_100n], ['FL', 880n], ['GA', 760n], ['NC', 540n], ['NY', 410n], ['TN', 410n]] as const)
         setStateRecords(ctx, id, st, n);
       setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 's3://avon-exports', label: 'Customer PII export', status: 'exfiltrated', recordsCount: 12_500n });
       execUpdate(ctx, id);
@@ -927,7 +1277,8 @@ const DRILL: { waitSec: number; run: (ctx: Ctx, id: bigint) => void }[] = [
 ];
 
 function scheduleStep(ctx: Ctx, incidentId: bigint, step: number) {
-  const at = ctx.timestamp.microsSinceUnixEpoch + BigInt(DRILL[step].waitSec) * 1_000_000n;
+  const fast = isAutopilot(ctx.db.incident.id.find(incidentId)?.title ?? '');
+  const at = ctx.timestamp.microsSinceUnixEpoch + BigInt(DRILL[step].waitSec) * (fast ? 500_000n : 1_000_000n);
   ctx.db.drillStep.insert({ scheduledId: 0n, scheduledAt: ScheduleAt.time(at), incidentId, step });
 }
 
@@ -965,8 +1316,8 @@ export const runDrillStep = db.reducer({ onSchedule: drillStep }, { row: drillSt
 });
 
 // ---------- Autopilot drill: the attack AND the response play out on their own ----------
-const AUTOPILOT_TICK_SEC = 5;
-const AUTOPILOT_MAX_TICKS = 120;
+const AUTOPILOT_TICK_SEC = 2;
+const AUTOPILOT_MAX_TICKS = 300; // 10 minutes at 2 s
 
 function scheduleAutopilot(ctx: Ctx, incidentId: bigint, tick: number) {
   const at = ctx.timestamp.microsSinceUnixEpoch + BigInt(AUTOPILOT_TICK_SEC) * 1_000_000n;
@@ -988,11 +1339,25 @@ export const runAutopilotStep = db.reducer({ onSchedule: autopilotStep }, { row:
   const inc = ctx.db.incident.id.find(row.incidentId);
   if (!inc || row.tick > AUTOPILOT_MAX_TICKS) return;
   const id = row.incidentId;
+  if (containing(ctx, id))
+    for (const a of [...ctx.db.fraudAlert.incidentId.filter(id)].filter(a => a.status === 'open')) {
+      ctx.db.fraudAlert.id.update({ ...a, status: 'frozen' });
+      audit(ctx, 'fraud_alert_status', `${a.id}: frozen (autopilot)`);
+      timeline(ctx, id, 'auto', `Autopilot: froze account ${a.accountRef}`);
+    }
   const open = [...ctx.db.task.incidentId.filter(id)]
     .filter(tk => tk.phase === inc.phase && !tk.done)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
   const tk = open[0];
-  if (tk && !AUTO_TASKS[tk.title]) {
+  if (tk && SIGNOFF_TASKS.has(tk.title)) {
+    // Drill only: a real incident needs two different people (signOffTask enforces that).
+    const at = ctx.timestamp;
+    const so = { taskId: tk.id, incidentId: id, doneBy: ctx.sender, doneAt: at, verifiedBy: ctx.sender, verifiedAt: at };
+    if (ctx.db.signoff.taskId.find(tk.id)) ctx.db.signoff.taskId.update(so);
+    else ctx.db.signoff.insert(so);
+    ctx.db.task.id.update({ ...tk, done: true });
+    timeline(ctx, id, 'auto', `Autopilot (drill): signed off and verified: ${tk.title}`);
+  } else if (tk && !AUTO_TASKS[tk.title]) {
     ctx.db.task.id.update({ ...tk, done: true });
     timeline(ctx, id, 'auto', `Autopilot: ${tk.title}`);
   } else if (tk?.title === 'Review every fraud alert: freeze or dismiss') {
@@ -1008,13 +1373,36 @@ export const runAutopilotStep = db.reducer({ onSchedule: autopilotStep }, { row:
       ctx.db.legalClock.id.update({ ...c, done: true });
       audit(ctx, 'complete_legal_clock', c.label);
     }
-  } // other verifiable tasks wait for the attack script to produce their evidence
+  } // other verifiable tasks wait for the attack script (or imported data) to produce their evidence
+  scheduleAutopilot(ctx, id, row.tick + 1); // before progress, so the phase countdown knows autopilot is on
   progress(ctx, id);
   const after = ctx.db.incident.id.find(id)!;
   const finished =
     after.phase === 'post_incident' && [...ctx.db.task.incidentId.filter(id)].filter(t2 => t2.phase === after.phase).every(t2 => t2.done);
-  if (finished) timeline(ctx, id, 'note', 'Autopilot drill complete: every phase done.');
-  else scheduleAutopilot(ctx, id, row.tick + 1);
+  if (finished) {
+    for (const r of [...ctx.db.autopilotStep.iter()].filter(r => r.incidentId === id && r.scheduledId !== row.scheduledId))
+      ctx.db.autopilotStep.scheduledId.delete(r.scheduledId);
+    timeline(ctx, id, 'note', 'Autopilot drill complete: every phase done.');
+  }
+});
+
+/**
+ * Autopilot on an EXISTING incident (e.g. one filled by Import from Nessie): no scripted attack, the robot responder
+ * works through every phase using the data already there. Real incidents need real people; this is for drills.
+ */
+export const runAutopilot = db.reducer({ incidentId: t.u64() }, (ctx, { incidentId }) => {
+  const me = requireRole(ctx, 'incident_lead');
+  const inc = requireIncident(ctx, incidentId);
+  if (inc.phase === 'post_incident') throw new SenderError('This incident is already finished: start a new one');
+  if (autopilotOn(ctx, incidentId)) throw new SenderError('Autopilot is already running on this incident');
+  if (![...ctx.db.scopeItem.incidentId.filter(incidentId)].length)
+    throw new SenderError('Nothing to respond to yet: import from Nessie (or add what was hit) first');
+  if (ctx.db.phaseHold.incidentId.find(incidentId)) ctx.db.phaseHold.incidentId.delete(incidentId); // a "Stay here" would stall it
+  const alerts = [...ctx.db.fraudAlert.incidentId.filter(incidentId)].length;
+  timeline(ctx, incidentId, 'note', `Autopilot started by ${me.name} on this incident's data (${alerts} fraud alert${alerts === 1 ? '' : 's'} so far)`);
+  audit(ctx, 'run_autopilot', `${incidentId}: ${inc.title}`);
+  scheduleAutopilot(ctx, incidentId, 0);
+  progress(ctx, incidentId);
 });
 
 // ---------- Views: the only way clients read data ----------
@@ -1028,39 +1416,53 @@ export const members = db.view({ name: 'members', public: true }, t.array(user.r
 export const incidents = db.view({ name: 'incidents', public: true }, t.array(incident.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.incident.iter()] : []
 );
-export const timelineEvents = db.view({ name: 'timelineEvents', public: true }, t.array(timelineEvent.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.timelineEvent.iter()] : []
-);
-export const scopeItems = db.view({ name: 'scopeItems', public: true }, t.array(scopeItem.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.scopeItem.iter()] : []
-);
+export const timelineEvents = db.view({ name: 'timelineEvents', public: true }, t.array(timelineEvent.rowType), ctx => {
+  const role = roleOf(ctx);
+  return role ? [...ctx.db.timelineEvent.iter()].filter(e => visibleTimeline(role, e.text)) : [];
+});
+// Responders see which systems were hit, not how many records, and not customer/account rows (they carry names).
+export const scopeItems = db.view({ name: 'scopeItems', public: true }, t.array(scopeItem.rowType), ctx => {
+  const role = roleOf(ctx);
+  if (!role) return [];
+  if (SEE_RECORDS.includes(role)) return [...ctx.db.scopeItem.iter()];
+  return [...ctx.db.scopeItem.iter()].filter(sc => sc.assetType === 'system').map(sc => ({ ...sc, recordsCount: 0n }));
+});
 export const tasks = db.view({ name: 'tasks', public: true }, t.array(task.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.task.iter()] : []
 );
-export const channels = db.view({ name: 'channels', public: true }, t.array(channel.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.channel.iter()] : []
-);
+const canReadChannel = (role: string, ch: { privileged: boolean; name: string } | null | undefined) =>
+  !!ch && (!ch.privileged || PRIVILEGED_ROLES.includes(role)) && (ch.name !== EXEC_CHANNEL || SEE_ALL.includes(role));
+export const channels = db.view({ name: 'channels', public: true }, t.array(channel.rowType), ctx => {
+  const role = roleOf(ctx);
+  return role ? [...ctx.db.channel.iter()].filter(c => canReadChannel(role, c)) : [];
+});
 export const messages = db.view({ name: 'messages', public: true }, t.array(message.rowType), ctx => {
   const role = roleOf(ctx);
   if (!role) return [];
-  if (PRIVILEGED_ROLES.includes(role)) return [...ctx.db.message.iter()];
-  return [...ctx.db.message.iter()].filter(m => !ctx.db.channel.id.find(m.channelId)?.privileged);
+  return [...ctx.db.message.iter()].filter(m => canReadChannel(role, ctx.db.channel.id.find(m.channelId)));
 });
+const has = (ctx: VCtx, roles: string[]) => roles.includes(roleOf(ctx) ?? '');
 export const legalClocks = db.view({ name: 'legalClocks', public: true }, t.array(legalClock.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.legalClock.iter()] : []
+  has(ctx, SEE_RECORDS) ? [...ctx.db.legalClock.iter()] : []
 );
 export const fraudAlerts = db.view({ name: 'fraudAlerts', public: true }, t.array(fraudAlert.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.fraudAlert.iter()] : []
+  has(ctx, SEE_ALL) ? [...ctx.db.fraudAlert.iter()] : []
 );
 export const stateImpacts = db.view({ name: 'stateImpacts', public: true }, t.array(stateImpact.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.stateImpact.iter()] : []
+  has(ctx, SEE_RECORDS) ? [...ctx.db.stateImpact.iter()] : []
 );
 export const notifyStatuses = db.view({ name: 'notifyStatuses', public: true }, t.array(notifyStatus.rowType), ctx =>
-  roleOf(ctx) ? [...ctx.db.notifyStatus.iter()] : []
+  has(ctx, SEE_RECORDS) ? [...ctx.db.notifyStatus.iter()] : []
 );
 export const phaseAdvances = db.view({ name: 'phaseAdvances', public: true }, t.array(phaseAdvance.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.phaseAdvance.iter()] : []
 );
+export const signoffs = db.view({ name: 'signoffs', public: true }, t.array(signoff.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.signoff.iter()] : []
+);
+export const nessieCursors = db.view({ name: 'nessieCursors', public: true }, t.array(nessieCursor.rowType), ctx =>
+  has(ctx, SEE_ALL) ? [...ctx.db.nessieCursor.iter()] : []
+);
 export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
-  roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []
+  has(ctx, AUDIT_READERS) ? [...ctx.db.auditLog.iter()] : []
 );

@@ -6,8 +6,14 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all procedure arg schemas
+import * as AskAdvisorProcedure from "../ask_advisor_procedure";
 import * as DraftNoticeProcedure from "../draft_notice_procedure";
+import * as ImportFromNessieProcedure from "../import_from_nessie_procedure";
 
+export type AskAdvisorArgs = __Infer<typeof AskAdvisorProcedure.params>;
+export type AskAdvisorResult = __Infer<typeof AskAdvisorProcedure.returnType>;
 export type DraftNoticeArgs = __Infer<typeof DraftNoticeProcedure.params>;
 export type DraftNoticeResult = __Infer<typeof DraftNoticeProcedure.returnType>;
+export type ImportFromNessieArgs = __Infer<typeof ImportFromNessieProcedure.params>;
+export type ImportFromNessieResult = __Infer<typeof ImportFromNessieProcedure.returnType>;
 

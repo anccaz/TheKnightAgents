@@ -43,7 +43,21 @@ export function useMe() {
 export const LEADS = ['admin', 'incident_lead'];
 export const WRITERS = ['admin', 'incident_lead', 'responder'];
 export const PRIVILEGED = ['admin', 'incident_lead', 'legal'];
+// Need to know (mirrors the server views): money and fraud for leadership; record counts and deadlines also for legal.
+export const SEE_ALL = ['admin', 'exec_viewer', 'incident_lead'];
+export const SEE_RECORDS = [...SEE_ALL, 'legal'];
 export const can = (me: { role: string } | undefined, roles: string[]) => !!me && roles.includes(me.role);
+
+// Two-person tasks (Remove threat, Recover). Keep in sync with SIGNOFF_TASKS in spacetimedb/src/index.ts.
+export const SIGNOFF_TASKS = new Set([
+  'Remove the malware and every attacker login',
+  'Patch the hole they came in through',
+  'Scan again to confirm no backdoors are left',
+  'Rebuild affected servers from clean, tested backups',
+  'Verify cryptographic hashes of the rebuilt core banking container',
+  'Confirm EDR clean scan on all isolated hosts',
+  'Rotate enterprise service account keys',
+]);
 
 /** Human-readable case number, e.g. INC-2026-0008 (year detected + incident id). */
 export const incidentCode = (inc: { id: bigint; detectedAt: { toDate(): Date } }) =>

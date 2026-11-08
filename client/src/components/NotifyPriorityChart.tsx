@@ -13,10 +13,10 @@ import { Sparkles } from 'lucide-react';
 // Validated with the dataviz palette checker on the #0b0f22 panel (CVD ΔE 18.4, contrast >= 3:1).
 const COLOR = { customers: '#1f9ad8', authorities: '#ff2d6f' } as const;
 type Group = keyof typeof COLOR;
-type Status = 'not_started' | 'drafted' | 'sent';
+export type Status = 'not_started' | 'drafted' | 'sent';
 const STATUS_LABEL: Record<Status, string> = { not_started: 'Not started', drafted: 'Drafted', sent: 'Sent' };
 const NOTIFIERS = ['admin', 'incident_lead', 'responder', 'legal'];
-type Notice = {
+export type Notice = {
   id: string; label: string; who: string; group: Group; people: number; due: Date | null; rule: string; short: string;
   status: Status; clockId?: bigint;
 };
@@ -27,25 +27,12 @@ const DAY = 86_400_000;
 const lx = (d: number) => PAD.l + ((Math.log(Math.min(Math.max(d, X_MIN), X_MAX)) - Math.log(X_MIN)) / (Math.log(X_MAX) - Math.log(X_MIN))) * (W - PAD.l - PAD.r);
 const fmt = (n: number) => (n >= 1000 ? `${+(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `${n}`);
 
-export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint }) {
+/** Every notice the bank owes for this incident (state rules + federal clocks), with live status. Shared with the advisor. */
+export function useNotices(incidentId: bigint): Notice[] {
   const [impacts] = useTable(tables.stateImpacts);
   const [clocks] = useTable(tables.legalClocks);
   const [statuses] = useTable(tables.notifyStatuses);
-  const me = useMe();
-  const setNotifyStatus = useReducer(reducers.setNotifyStatus);
-  const completeLegalClock = useReducer(reducers.completeLegalClock);
-  const draftNotice = useProcedure(procedures.draftNotice);
-  const [drafting, setDrafting] = useState<string | null>(null);
-  const run = useRun();
-  const [now, setNow] = useState(Date.now());
-  const [hover, setHover] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
-
-  const notices = useMemo(() => {
+  return useMemo(() => {
     const rows = impacts.filter(r => r.incidentId === incidentId && r.records > 0n);
     const total = rows.reduce((n, r) => n + Number(r.records), 0);
     const statusOf = (id: string) =>
@@ -85,6 +72,24 @@ export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint
         });
     return out.sort((a, b) => (a.due?.getTime() ?? 0) - (b.due?.getTime() ?? 0));
   }, [impacts, clocks, statuses, incidentId]);
+}
+
+export default function NotifyPriorityChart({ incidentId }: { incidentId: bigint }) {
+  const me = useMe();
+  const setNotifyStatus = useReducer(reducers.setNotifyStatus);
+  const completeLegalClock = useReducer(reducers.completeLegalClock);
+  const draftNotice = useProcedure(procedures.draftNotice);
+  const [drafting, setDrafting] = useState<string | null>(null);
+  const run = useRun();
+  const [now, setNow] = useState(Date.now());
+  const [hover, setHover] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const notices = useNotices(incidentId);
 
   const mark = (n: Notice, status: Status) => {
     if (status === 'sent' && !window.confirm(`Mark "${n.label}" as sent? This is recorded in the audit log.`)) return;

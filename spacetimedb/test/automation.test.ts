@@ -39,12 +39,42 @@ test('declaring and moving phases creates guided tasks without duplicates', () =
   expect(count()).toBe(6);
 });
 
-test('transfers of $10,000 or more are frozen automatically', () => {
+test('transfers of $10,000 or more freeze automatically only from Contain on', () => {
   const h = setup();
   const alert = (amountCents: bigint) => ({ incidentId: 1n, accountRef: 'A', transferRef: 'T', amountCents, reason: 'r' });
+  const statuses = () => h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()].map(a => a.status));
   h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, alert(999_999n)));
   h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, alert(1_000_000n)));
-  expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()].map(a => a.status))).toEqual(['open', 'frozen']);
+  expect(statuses()).toEqual(['open', 'open']); // Detect: flagged, not frozen
+  h.withReducerTx(as('admin'), ctx => mod.setPhase(ctx, { incidentId: 1n, phase: 'contain' }));
+  expect(statuses()).toEqual(['open', 'frozen']); // reaching Contain freezes the big one only
+  h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, alert(2_000_000n)));
+  expect(statuses()).toEqual(['open', 'frozen', 'frozen']); // in Contain: instant
+});
+
+test('sign-off tasks need a different lead to verify', () => {
+  const h = setup();
+  const id = (sub: string) => h.withReducerTx(as(sub), ctx => ctx.sender);
+  const add = (sub: string, role: string) => {
+    const target = id(sub); // outside the next transaction: they can't nest
+    h.withReducerTx(as('owner'), ctx => mod.addMember(ctx, { target, name: sub, email: sub, role }));
+  };
+  add('resp', 'responder');
+  add('resp2', 'responder');
+  add('lead', 'incident_lead');
+  h.withReducerTx(as('admin'), ctx => mod.setPhase(ctx, { incidentId: 1n, phase: 'eradicate' }));
+  const tk = tasksOf(h, 'eradicate')[0];
+  const sign = (who: string) => h.withReducerTx(as(who), ctx => mod.signOffTask(ctx, { taskId: tk.id }));
+  expect(() => h.withReducerTx(as('resp'), ctx => mod.toggleTask(ctx, { taskId: tk.id }))).toThrow(/sign-off/);
+  sign('resp');
+  expect(tasksOf(h, 'eradicate')[0].done).toBe(false); // waiting for verification
+  expect(() => sign('resp2')).toThrow(/Requires role/); // a responder cannot verify
+  sign('lead');
+  expect(tasksOf(h, 'eradicate')[0].done).toBe(true);
+  expect(() => sign('lead')).toThrow(/Already verified/);
+  const so = h.withReducerTx(as('admin'), ctx => ctx.db.signoff.taskId.find(tk.id)!);
+  const [r, l] = [id('resp'), id('lead')];
+  expect(so.doneBy.isEqual(r) && so.verifiedBy!.isEqual(l)).toBe(true);
 });
 
 test('drill creates an incident and schedules steps; clients cannot fire steps themselves', () => {
@@ -166,8 +196,34 @@ test('autopilot drives an incident through all six phases', () => {
   expect(phaseOf(h, id)).toBe('post_incident');
   const done = h.withReducerTx(as('admin'), ctx => [...ctx.db.task.iter()].filter(t => t.incidentId === id).every(t => t.done));
   expect(done).toBe(true);
+  const openAlerts = h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()].filter(a => a.incidentId === id && a.status === 'open').length);
+  expect(openAlerts).toBe(0);
   const clocksFiled = h.withReducerTx(as('admin'), ctx => [...ctx.db.legalClock.iter()].filter(c => c.incidentId === id).every(c => c.done));
   expect(clocksFiled).toBe(true);
+});
+
+test('autopilot runs on an existing incident filled with imported data', () => {
+  const h = setup();
+  expect(() => h.withReducerTx(as('admin'), ctx => mod.runAutopilot(ctx, { incidentId: 1n }))).toThrow(/import from Nessie/);
+  // What Import from Nessie leaves behind: customers by state, stolen records, a flagged account and its fraud alerts.
+  h.withReducerTx(as('admin'), ctx => mod.setStateImpact(ctx, { incidentId: 1n, state: 'TX', records: 162n }));
+  h.withReducerTx(as('admin'), ctx => mod.upsertScopeItem(ctx, { ...scope('exfiltrated', 260n, 'nessie-customers'), assetType: 'customer' }));
+  for (const amountCents of [2_041_200n, 849_000n])
+    h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, { incidentId: 1n, accountRef: 'CHK-4085', transferRef: `withdrawal:${amountCents}`, amountCents, reason: 'r' }));
+  h.withReducerTx(as('admin'), ctx => mod.runAutopilot(ctx, { incidentId: 1n }));
+  expect(() => h.withReducerTx(as('admin'), ctx => mod.runAutopilot(ctx, { incidentId: 1n }))).toThrow(/already running/);
+  for (let tick = 0; tick < 80 && phaseOf(h) !== 'post_incident'; tick++) {
+    h.withReducerTx(TestAuth.internal(), ctx => mod.runAutopilotStep(ctx, { row: { scheduledId: 0n, scheduledAt: ScheduleAt.time(0n), incidentId: 1n, tick } }));
+    for (const row of pendingAdvance(h).filter(r => r.incidentId === 1n)) {
+      expect(Number(row.at.microsSinceUnixEpoch - h.withReducerTx(as('admin'), ctx => ctx.timestamp.microsSinceUnixEpoch))).toBeLessThan(10_000_000); // fast countdown
+      h.withReducerTx(TestAuth.internal(), ctx => mod.runPhaseAdvance(ctx, { row }));
+    }
+  }
+  for (let tick = 0; tick < 6; tick++)
+    h.withReducerTx(TestAuth.internal(), ctx => mod.runAutopilotStep(ctx, { row: { scheduledId: 0n, scheduledAt: ScheduleAt.time(0n), incidentId: 1n, tick } }));
+  expect(phaseOf(h)).toBe('post_incident');
+  expect(tasksOf(h, 'post_incident').every(t => t.done)).toBe(true);
+  expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()].filter(a => a.status === 'open').length)).toBe(0);
 });
 
 test('SEC 8-K clock lands 4 business days out, never on a weekend', () => {

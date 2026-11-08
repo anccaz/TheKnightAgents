@@ -1,5 +1,11 @@
-# Nessie seed (First Avon Bank)
-- Put `NESSIE_API_KEY=...` in the repo-root `.env` (or export it). Never commit it.
-- Preview without network: `node scripts/seed-nessie.mjs --dry-run --count 5`
-- Seed for real: `node scripts/seed-nessie.mjs --reset --count 200` (wipes your key's Customers/Accounts first; writes `scripts/seed-output.json` with ids and the planted `suspicious` transfers).
-- Tests: `node --test scripts/*.test.mjs` (fake data is deterministic: same `--count` gives the same bank).
+# Nessie scripts (First Avon Bank)
+- Put `NESSIE_API_KEY=...` in the repo-root `.env` (or export it). Never commit it; the scripts never print URLs because they carry the key.
+- Preview without network: `node scripts/seed-nessie.mjs --dry-run`
+- Seed: `node scripts/seed-nessie.mjs --reset` deletes every account and bill under your key (Nessie cannot delete customers), then creates 260 fake customers in TX/CA/FL/NY/OK with accounts, withdrawals and bills, 6 planted fraud items and 5 clean "live target" accounts. Writes `scripts/seed-output.json`.
+- Import into an incident: `node scripts/import-nessie.mjs --incident <id> --server maincloud` (calls reducers through the `spacetime` CLI; that identity must be an incident lead or responder). Progress goes to `scripts/import-state.json` per server/db/incident, so reruns never duplicate; `--fresh` forgets it.
+- Live demo: `import-nessie.mjs ... --watch` in one terminal, `node scripts/seed-nessie.mjs --plant` in another: a new $12k+ withdrawal appears and is auto-frozen within ~10 s.
+- Fraud rule (`lib.mjs` `isSuspicious`): $5,000+ at 2-4 AM (time read from the description/nickname, Nessie dates have no time), and for bills a payee the bank has not seen. $10,000+ auto-freezes in the module.
+- Tests: `node --test scripts/lib.test.mjs` (fake data is deterministic: same `--count` gives the same bank).
+- `seed-output.json` and `import-state.json` are local run data and are gitignored.
+- Use a clean incident (not a drill one): `spacetime call --server maincloud breach-room create_incident '"Nessie import test"' '"critical"' '"data_theft"'`. Start `--watch` before `--plant`, or the plant is caught by the first scan and doesn't look live.
+- To see Maincloud in the browser: `VITE_SPACETIME_URI=wss://maincloud.spacetimedb.com npm run dev` in `client/`, then get your browser's key added on Team.

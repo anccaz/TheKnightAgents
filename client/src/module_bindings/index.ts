@@ -39,13 +39,17 @@ import AddTaskReducer from "./add_task_reducer";
 import AddTimelineEventReducer from "./add_timeline_event_reducer";
 import CompleteLegalClockReducer from "./complete_legal_clock_reducer";
 import CreateIncidentReducer from "./create_incident_reducer";
+import LogAdvisorActionReducer from "./log_advisor_action_reducer";
 import RaiseFraudAlertReducer from "./raise_fraud_alert_reducer";
+import RemoveMemberReducer from "./remove_member_reducer";
+import RunAutopilotReducer from "./run_autopilot_reducer";
 import SendMessageReducer from "./send_message_reducer";
 import SetFraudAlertStatusReducer from "./set_fraud_alert_status_reducer";
 import SetNotifyStatusReducer from "./set_notify_status_reducer";
 import SetPhaseReducer from "./set_phase_reducer";
 import SetRoleReducer from "./set_role_reducer";
 import SetStateImpactReducer from "./set_state_impact_reducer";
+import SignOffTaskReducer from "./sign_off_task_reducer";
 import StartAutopilotDrillReducer from "./start_autopilot_drill_reducer";
 import StartDrillReducer from "./start_drill_reducer";
 import StartLegalClockReducer from "./start_legal_clock_reducer";
@@ -55,7 +59,9 @@ import ToggleTaskReducer from "./toggle_task_reducer";
 import UpsertScopeItemReducer from "./upsert_scope_item_reducer";
 
 // Import all procedure arg schemas
+import * as AskAdvisorProcedure from "./ask_advisor_procedure";
 import * as DraftNoticeProcedure from "./draft_notice_procedure";
+import * as ImportFromNessieProcedure from "./import_from_nessie_procedure";
 
 // Import all table schema definitions
 import AuditEntriesRow from "./audit_entries_table";
@@ -65,9 +71,11 @@ import IncidentsRow from "./incidents_table";
 import LegalClocksRow from "./legal_clocks_table";
 import MembersRow from "./members_table";
 import MessagesRow from "./messages_table";
+import NessieCursorsRow from "./nessie_cursors_table";
 import NotifyStatusesRow from "./notify_statuses_table";
 import PhaseAdvancesRow from "./phase_advances_table";
 import ScopeItemsRow from "./scope_items_table";
+import SignoffsRow from "./signoffs_table";
 import StateImpactsRow from "./state_impacts_table";
 import TasksRow from "./tasks_table";
 import TimelineEventsRow from "./timeline_events_table";
@@ -125,6 +133,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, MessagesRow),
+  nessieCursors: __table({
+    name: 'nessieCursors',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, NessieCursorsRow),
   notifyStatuses: __table({
     name: 'notifyStatuses',
     indexes: [
@@ -146,6 +161,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, ScopeItemsRow),
+  signoffs: __table({
+    name: 'signoffs',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, SignoffsRow),
   stateImpacts: __table({
     name: 'stateImpacts',
     indexes: [
@@ -176,13 +198,17 @@ const reducersSchema = __reducers(
   __reducerSchema("add_timeline_event", AddTimelineEventReducer),
   __reducerSchema("complete_legal_clock", CompleteLegalClockReducer),
   __reducerSchema("create_incident", CreateIncidentReducer),
+  __reducerSchema("log_advisor_action", LogAdvisorActionReducer),
   __reducerSchema("raise_fraud_alert", RaiseFraudAlertReducer),
+  __reducerSchema("remove_member", RemoveMemberReducer),
+  __reducerSchema("run_autopilot", RunAutopilotReducer),
   __reducerSchema("send_message", SendMessageReducer),
   __reducerSchema("set_fraud_alert_status", SetFraudAlertStatusReducer),
   __reducerSchema("set_notify_status", SetNotifyStatusReducer),
   __reducerSchema("set_phase", SetPhaseReducer),
   __reducerSchema("set_role", SetRoleReducer),
   __reducerSchema("set_state_impact", SetStateImpactReducer),
+  __reducerSchema("sign_off_task", SignOffTaskReducer),
   __reducerSchema("start_autopilot_drill", StartAutopilotDrillReducer),
   __reducerSchema("start_drill", StartDrillReducer),
   __reducerSchema("start_legal_clock", StartLegalClockReducer),
@@ -194,7 +220,9 @@ const reducersSchema = __reducers(
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
 const proceduresSchema = __procedures(
+  __procedureSchema("ask_advisor", AskAdvisorProcedure.params, AskAdvisorProcedure.returnType),
   __procedureSchema("draft_notice", DraftNoticeProcedure.params, DraftNoticeProcedure.returnType),
+  __procedureSchema("import_from_nessie", ImportFromNessieProcedure.params, ImportFromNessieProcedure.returnType),
 );
 
 /** The remote SpacetimeDB module schema, both runtime and type information. */

@@ -107,6 +107,18 @@ export type Message = __Infer<typeof Message>;
 export const Messages = __t.object("Messages", {});
 export type Messages = __Infer<typeof Messages>;
 
+export const NessieCursor = __t.object("NessieCursor", {
+  incidentId: __t.u64(),
+  offset: __t.u32(),
+  total: __t.u32(),
+  at: __t.timestamp(),
+  checked: __t.u32(),
+});
+export type NessieCursor = __Infer<typeof NessieCursor>;
+
+export const NessieCursors = __t.object("NessieCursors", {});
+export type NessieCursors = __Infer<typeof NessieCursors>;
+
 export const NotifyStatus = __t.object("NotifyStatus", {
   id: __t.u64(),
   incidentId: __t.u64(),
@@ -160,6 +172,19 @@ export type ScopeItem = __Infer<typeof ScopeItem>;
 
 export const ScopeItems = __t.object("ScopeItems", {});
 export type ScopeItems = __Infer<typeof ScopeItems>;
+
+export const Signoff = __t.object("Signoff", {
+  taskId: __t.u64(),
+  incidentId: __t.u64(),
+  doneBy: __t.identity(),
+  doneAt: __t.timestamp(),
+  verifiedBy: __t.option(__t.identity()),
+  verifiedAt: __t.option(__t.timestamp()),
+});
+export type Signoff = __Infer<typeof Signoff>;
+
+export const Signoffs = __t.object("Signoffs", {});
+export type Signoffs = __Infer<typeof Signoffs>;
 
 export const StateImpact = __t.object("StateImpact", {
   id: __t.u64(),
