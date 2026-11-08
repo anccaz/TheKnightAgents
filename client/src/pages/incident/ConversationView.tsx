@@ -29,16 +29,14 @@ const initials = (name: string) => name.split(/\s+/).map(w => w[0]).join('').sli
 export default function ConversationView({ incident }: { incident: Incident }) {
   const summary = incident.phase === 'post_incident';
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="flex min-w-0 flex-col gap-6">
-        {summary && <AfterActionSummary incident={incident} />}
-        <Thread incident={incident} />
-      </div>
-      <aside className="flex min-w-0 flex-col gap-6">
-        <PhaseRail incident={incident} />
-        <Tasks incidentId={incident.id} phase={incident.phase} />
+    <div className="flex flex-col gap-6">
+      <PhaseRail incident={incident} />
+      {summary && <AfterActionSummary incident={incident} />}
+      <div className="grid items-start gap-6 lg:grid-cols-2">
         <Details incident={incident} />
-      </aside>
+        <Tasks incidentId={incident.id} phase={incident.phase} />
+      </div>
+      <Thread incident={incident} />
     </div>
   );
 }
@@ -118,7 +116,7 @@ function Thread({ incident }: { incident: Incident }) {
   const stolen = scope.filter(s => s.incidentId === incident.id && s.status === 'exfiltrated').reduce((n, s) => n + s.recordsCount, 0n);
 
   return (
-    <section className="glass flex h-[calc(100vh-11rem)] min-h-[34rem] flex-col overflow-hidden p-0" aria-label="Incident conversation">
+    <section className="glass flex h-[40rem] flex-col overflow-hidden p-0" aria-label="Incident conversation">
       <header className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-gradient-to-r from-sky-500/10 via-violet-500/10 to-fuchsia-500/10 px-4 py-3">
         <span className="relative mr-1 flex size-2.5">
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
@@ -314,7 +312,7 @@ function FraudCard({ it, canDecide, decide }: { it: Extract<Item, { type: 'fraud
   );
 }
 
-/** Compact vertical phase list with the one big "move on" button. */
+/** Slim horizontal phase bar with the one "move on" button. */
 function PhaseRail({ incident }: { incident: Incident }) {
   const me = useMe();
   const setPhase = useReducer(reducers.setPhase);
@@ -323,35 +321,38 @@ function PhaseRail({ incident }: { incident: Incident }) {
   const next = PHASES[idx + 1];
   const lead = can(me, LEADS);
   return (
-    <section className="glass flex flex-col gap-3 p-5" aria-label="Phases">
-      <h2 className="font-heading text-sm font-bold tracking-[0.2em] text-white uppercase">Where we are</h2>
-      <ol className="flex flex-col gap-1">
-        {PHASES.map((p, i) => (
-          <li key={p} className="flex items-center gap-3 text-sm" aria-current={i === idx ? 'step' : undefined}>
-            <span
-              className={cn(
-                'grid size-6 shrink-0 place-items-center rounded-full text-xs font-bold',
-                i < idx && 'bg-emerald-500/20 text-emerald-300',
-                i === idx && 'bg-gradient-to-br from-sky-400 to-violet-600 text-white shadow-lg shadow-violet-500/30',
-                i > idx && 'border border-white/10 text-muted-foreground'
-              )}
-            >
-              {i < idx ? '✓' : i + 1}
-            </span>
-            <span className={cn(i === idx ? 'font-semibold text-white' : i < idx ? 'text-foreground/70' : 'text-muted-foreground')}>{PHASE_LABEL[p]}</span>
-          </li>
-        ))}
-      </ol>
+    <section className="glass flex flex-col gap-2 px-4 py-2.5" aria-label="Phases">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+        <ol className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+          {PHASES.map((p, i) => (
+            <li key={p} className="flex items-center gap-1" aria-current={i === idx ? 'step' : undefined}>
+              <span
+                className={cn(
+                  'inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium whitespace-nowrap',
+                  i < idx && 'bg-emerald-500/15 text-emerald-300',
+                  i === idx && 'bg-gradient-to-r from-sky-500 to-violet-600 font-bold text-white shadow-lg shadow-violet-500/30',
+                  i > idx && 'text-muted-foreground'
+                )}
+              >
+                {i < idx ? '✓' : i + 1} {PHASE_LABEL[p]}
+                <span className="sr-only">{i < idx ? '(done)' : i === idx ? '(now)' : '(not started)'}</span>
+              </span>
+              {i < PHASES.length - 1 && <span className={cn('h-px w-3 sm:w-5', i < idx ? 'bg-emerald-400/50' : 'bg-white/15')} aria-hidden="true" />}
+            </li>
+          ))}
+        </ol>
+        {next && lead && (
+          <Button
+            size="sm"
+            className="rounded-full bg-gradient-to-r from-sky-500 to-violet-600 px-4 font-bold text-white hover:opacity-90"
+            onClick={() => run(setPhase({ incidentId: incident.id, phase: next }), `Phase: ${PHASE_LABEL[next]}`)}
+          >
+            Move to {PHASE_LABEL[next]} →
+          </Button>
+        )}
+        {!lead && <span className="text-xs text-muted-foreground">Only the incident lead moves phases.</span>}
+      </div>
       <AutoAdvanceBanner incidentId={incident.id} />
-      {next && lead && (
-        <Button
-          className="h-auto min-h-11 rounded-xl bg-gradient-to-r from-sky-500 to-violet-600 py-2 font-bold whitespace-normal text-white hover:opacity-90"
-          onClick={() => run(setPhase({ incidentId: incident.id, phase: next }), `Phase: ${PHASE_LABEL[next]}`)}
-        >
-          Done with {PHASE_LABEL[incident.phase]}: move to {PHASE_LABEL[next]} →
-        </Button>
-      )}
-      {!lead && <p className="text-xs text-muted-foreground">Only the incident lead moves phases.</p>}
     </section>
   );
 }
@@ -362,7 +363,9 @@ function Details({ incident }: { incident: Incident }) {
   return (
     <section className="glass flex flex-col gap-3 p-5">
       <h2 className="font-heading text-sm font-bold tracking-[0.2em] text-white uppercase">Bank data</h2>
-      <NessieImport incidentId={incident.id} />
+      <div className="[&>div>span]:basis-full">
+        <NessieImport incidentId={incident.id} />
+      </div>
       <Fold title="Incident record">
         <IncidentRecord incident={incident} />
       </Fold>
