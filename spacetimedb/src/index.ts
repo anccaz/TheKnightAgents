@@ -930,7 +930,9 @@ type HttpCtx = { http: { fetch(url: string, init?: any): any } };
  * One Gemini text generation with model fallback, retries and short timeouts (shared by AI drafts and the advisor).
  * Returns text = null when Gemini is busy or down; throws SenderError on setup problems (bad key, quota).
  */
-function geminiGenerate(ctx: HttpCtx, key: string, model: string | null, prompt: string, config: Record<string, unknown>, tag: string) {
+// The module waits while a procedure's HTTP call is out, so background callers (the AI agents) pass a tight budget.
+type GeminiBudget = { calls: number; timeoutMs: number };
+function geminiGenerate(ctx: HttpCtx, key: string, model: string | null, prompt: string, config: Record<string, unknown>, tag: string, budget: GeminiBudget = { calls: GEMINI_MAX_CALLS, timeoutMs: GEMINI_CALL_TIMEOUT_MS }) {
     // Speed: no "thinking" (a form letter does not need it), a capped length, a short per-call timeout and an overall
     // budget, so a click answers in seconds. If a model rejects the thinking setting (HTTP 400), retry it once without.
     const body = (thinking: ThinkingConfig) =>
@@ -945,7 +947,7 @@ function geminiGenerate(ctx: HttpCtx, key: string, model: string | null, prompt:
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
           body: body(thinking),
-          timeout: TimeDuration.fromMillis(GEMINI_CALL_TIMEOUT_MS),
+          timeout: TimeDuration.fromMillis(budget.timeoutMs),
         });
       } catch {
         return { ok: false, status: 504, json: () => null }; // timed out / network error: treat like "busy"
@@ -974,7 +976,7 @@ function geminiGenerate(ctx: HttpCtx, key: string, model: string | null, prompt:
     const tried = new Set<string>();
     let res: Res | null = null;
     let usedModel = first ?? '', calls = 0;
-    while (calls < GEMINI_MAX_CALLS) {
+    while (calls < budget.calls) {
       const m = queue.shift();
       if (!m) {
         if (candidates) break;
@@ -1312,17 +1314,20 @@ export const runAgents = db.procedure({ incidentId: t.u64() }, t.string(), (ctx,
   } catch {
     key = undefined; // no environment (unit tests): use the fixed fallback
   }
-  // 2. Ask Gemini outside any transaction (HTTP is not allowed inside withTx).
+  // 2. Ask Gemini outside any transaction (HTTP is not allowed inside withTx). One quick try per agent, and if Gemini is
+  // down for the first, the second skips it: a slow Gemini must never hold up the incident room.
+  let geminiUp = !!key;
   const posts = AGENTS.map((a, i) => {
     const lines = job.facts[i];
     let text: string | null = null;
-    if (key) {
+    if (key && geminiUp) {
       const prompt = [a.brief, `Current phase: ${PHASE_LABELS[job.phase] ?? job.phase}.`, 'Use only these facts; cite them by their [TAG]. Plain text, no markdown, at most 3 short bullets starting with "- ", under 90 words.', '', ...lines].join('\n');
       try {
-        text = geminiGenerate(ctx, key, model, prompt, { temperature: 0.2, maxOutputTokens: 300 }, `agent${a.name}`).text;
+        text = geminiGenerate(ctx, key, model, prompt, { temperature: 0.2, maxOutputTokens: 300 }, `agent${a.name}`, { calls: 1, timeoutMs: 6_000 }).text;
       } catch {
         text = null;
       }
+      if (!text) geminiUp = false;
     }
     const body = text ?? a.fallback(lines).map(l => `- ${l}`).join('\n');
     return { a, text: `${AGENT_PREFIX} ${a.name} agent (${a.role.replace('_', ' ')} access), ${PHASE_LABELS[job.phase] ?? job.phase}${text ? '' : ' (offline summary)'}:\n${body || '- Nothing new for this role yet.'}` };
