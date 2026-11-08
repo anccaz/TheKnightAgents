@@ -7,6 +7,8 @@ Built at HackUTD 2026 for three tracks:
 - **Spacetime**: SpacetimeDB is the whole backend. Every rule is a reducer, every screen is a live subscription.
 - **Capital One**: Best Use of Nessie. Nessie customers and transactions feed the notice chart and fraud alerts (Lane C importer).
 
+The product was renamed from "Breach Room" to **Knight Agent**. The technical id `breach-room` is kept on purpose (database name, browser storage keys, package names, the `breach-room-ui` skill), so existing databases and logins keep working.
+
 ## Quick start for a teammate (Maincloud, 1 terminal)
 ```bash
 cd client
@@ -37,7 +39,11 @@ Install the SpacetimeDB CLI first: https://spacetimedb.com/install
    ```
    then `cd client && npm install && npm run dev`.
 
-**AI notice drafts (optional, Gemini).** The key lives in the database's private environment, never in git or the browser:
+Port 3010 is used because 3000 is often taken; any free port works if you change it in all three places. On Windows, if `spacetime` is not found, add it to the path for that terminal: `$env:Path += ";$env:LOCALAPPDATA\SpacetimeDB"` (PowerShell).
+
+**Switching between local and Maincloud.** `client/.env` decides the server. Delete or rename it (for example to `client/.env.local-dev`) to use Maincloud, then restart `npm run dev`. The browser keeps a separate login per server, so you may need to be added again by ID on the other one. If the app shows a rejected-login screen, it clears the bad token and reloads once by itself.
+
+**AI notice drafts and the incident advisor (optional, Gemini).** Both use the same key. It lives in the database's private environment, never in git or the browser:
 ```bash
 cd spacetimedb
 export GEMINI_API_KEY=<your key>   # from https://aistudio.google.com/apikey
@@ -45,7 +51,14 @@ npm run publish:local              # or publish:cloud; the CLI picks up declared
 # change only the key later, without republishing code:
 spacetime publish --server http://127.0.0.1:3010 breach-room --env-only
 ```
+```powershell
+# PowerShell equivalent
+$env:GEMINI_API_KEY="<your key>"
+spacetime publish --server http://127.0.0.1:3010 breach-room --env-only
+```
 By default it uses the newest stable Flash-Lite model your key has; set `GEMINI_MODEL=<name>` to pin one. If Gemini is busy it posts a labeled template draft instead; without a key the button shows an error and everything else works.
+
+**Careful:** publishing (or resetting) a database from a terminal where `GEMINI_API_KEY` is not set clears the stored key. If the advisor suddenly says "Rule-based (AI is not configured)", set the key again with `--env-only`. Gemini keys from AI Studio start with `AIza`. Never paste a key into chat or a commit; rotate it if you do.
 
 **First admin.** Open the app, click **Copy my ID**, then the person who published the database runs:
 ```bash
@@ -61,6 +74,8 @@ Drop `--server ...` to target Maincloud. CLI reducer names are snake_case (`add_
 Cloud publish: `spacetime login` then `npm run publish:cloud` in `spacetimedb/` (add `--delete-data` if a schema change is refused; demo data only). Re-add members by ID afterwards.
 
 ## The 3 pages
+The header always shows the incident ID (for example `INC-2026-0005`, from the database id), the phase, severity, who is online and the connection state. The same ID is the first row of the **Incident record**.
+
 **Incident.** With no incident, fill in **What is happening?**, **How bad?** and **Type**, then click **Declare incident** (or **Run 2 AM drill**). Once declared: a 6-phase NIST stepper (Detect, Analyze, Contain, Eradicate, Recover, Post-incident) with one big **Done with X: move to Y** button, the **Incident record** built from what has happened, **What do I do next?** (guided tasks for the current phase, plus **Add task**), **What was hit** (record counters, status per system, **Add system**), and **Fraud: needs a decision** with **Freeze** and **It's fine** per alert.
 
 **Live Feed.** **Who must we tell first** at the top: a bubble chart of every notice owed (state customers, state Attorney General, bank regulator, SEC), placed by time left and people affected, with a notice queue where you click **Mark drafted**, **Mark sent** or **Reopen**. Below it, **Deadlines** (live countdowns, mark filed, **Start clock** for a custom one), then one merged feed of chat, timeline and security events with **All / Chat / Auto / Security** filters. The composer sends to the selected channel (#general, #containment, #legal for lawyers and leads only, #exec) or, with **Log as incident note**, writes to the timeline.
@@ -84,7 +99,7 @@ The app reacts on its own (shown as **Auto** in the feed):
 
 Rules live in `spacetimedb/src/index.ts`: `DRILL`, `LEGAL_RULES`, `AUTO_FREEZE_CENTS`, `GUIDED`. State notice rules live in `client/src/lib/notifyRules.ts`. Legal rules are for the demo; verify before relying on them.
 
-Per-sponsor demo scripts: [docs/demo-script.md](docs/demo-script.md).
+Per-sponsor demo scripts: [docs/demo-script.md](docs/demo-script.md). A recorded 2.5-minute autopilot demo with voice-over exists locally in `demo/knight-agent-demo.mp4` (not committed; videos are too big for git, share it through Drive or Devpost).
 
 ## Demo: real bank data from Nessie (Capital One)
 Instead of the scripted drill, an incident can be filled from Capital One's Nessie API. Put `NESSIE_API_KEY=...` in the root `.env` (never commit it). The `spacetime` CLI identity must be a member: run `spacetime login show`, then add that ID on **Team** (incident lead or admin if it should also create incidents, responder is enough to import).
@@ -125,13 +140,14 @@ There is no app server. The browser talks to SpacetimeDB directly over a websock
 ```
 spacetimedb/              SpacetimeDB TypeScript module (tables, views, reducers, drill)
   src/index.ts            the whole backend and data contract
-  test/                   vitest: roles.test.ts, automation.test.ts
+  src/advisor.ts          advisor prompt, citation and action checks, rule-based fallback
+  test/                   vitest: roles, automation, advisor
 client/                   React 18 + Vite + Tailwind
   src/App.tsx             header, 3 tabs, background
   src/pages/incident/     Incident page
   src/pages/feed/         Live Feed page
   src/pages/team/         Team page + join screen
-  src/components/         NotifyPriorityChart, shared hooks, toasts, ui/
+  src/components/         NotifyPriorityChart, AdvisorWidget, AfterActionSummary, shared hooks, toasts, ui/
   src/lib/notifyRules.ts  state notice rules
   src/module_bindings/    generated, do not edit
 scripts/                  Nessie seed and fraud rules (Lane C)
@@ -142,9 +158,9 @@ docs/                     plan.md, agent-prompts.md, demo-script.md
 | Lane | Owner | Owns | Reducers |
 |---|---|---|---|
 | A | Annie | Access control, roles, audit log, views, Maincloud | `addMember` `setRole` |
-| B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `sendMessage` `setNotifyStatus` `startDrill` `stopDrill` |
+| B | Sameeraa | Incident page, Live Feed, notice chart, drill, demo | `createIncident` `setPhase` `addTimelineEvent` `addTask` `toggleTask` `sendMessage` `setNotifyStatus` `startDrill` `startAutopilotDrill` `stopDrill` `stayInPhase` `askAdvisor` `logAdvisorAction` |
 | C | Navya | Nessie seed and importer, scope, fraud watch | `upsertScopeItem` `raiseFraudAlert` `setFraudAlertStatus` `setStateImpact` |
-| D | _name_ | Legal rules, Gemini drafts, Devpost, pitch | `startLegalClock` `completeLegalClock` |
+| D | Navya | Legal rules, Gemini drafts, Devpost, pitch | `startLegalClock` `completeLegalClock` `draftNotice` |
 
 ## Checklist
 
@@ -172,7 +188,11 @@ Tick boxes as you go (edit this file, commit, push). Deadlines: **initial Devpos
 - [x] "Who must we tell first" notice chart with Mark drafted / Mark sent
 - [x] Status updates posted to #exec
 - [x] README refresh and [docs/demo-script.md](docs/demo-script.md)
-- [ ] Record the backup drill video on Maincloud (two browsers side by side)
+- [x] Smart flow: tasks tick themselves, phases auto-advance with **Stay here**, Autopilot drill
+- [x] Incident ID in the header and record
+- [x] Incident advisor (Gemini, cited, two-step confirm) and after-action summary
+- [x] Backup demo video with voice-over (recorded on the local DB, `demo/`, not committed)
+- [ ] Optional: re-record on Maincloud with Gemini answers in the advisor
 
 ### Lane C: Nessie + scope + fraud
 - [x] Fix `scripts/seed-nessie.mjs` against the verified Nessie endpoints (unit tested; confirm on the first real `--reset` run)
@@ -185,7 +205,7 @@ Tick boxes as you go (edit this file, commit, push). Deadlines: **initial Devpos
 - [ ] **Initial Devpost by 11 PM**: title, one-liner, select Winstead, Spacetime, Capital One plus MLH Gemini, GoDaddy
 - [ ] Verify the legal rules (`LEGAL_RULES` in the module, `client/src/lib/notifyRules.ts`) with sources
 - [x] Auto-start legal clocks when data is first marked stolen
-- [ ] Gemini notice draft. Keep the key **server-side** (Spacetime procedure or a tiny Node endpoint), never in `client/`
+- [x] Gemini notice draft (**Draft with AI** in the notice queue), key kept server-side in the database environment
 - [ ] Register the domain with GoDaddy code `MLHUTD84`
 - [ ] Slides and a backup demo video by 11 AM Sunday
 - [ ] After submitting: write the DEV post (leave out sponsor-confidential challenge text)
