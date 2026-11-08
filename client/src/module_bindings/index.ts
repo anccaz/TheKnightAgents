@@ -47,6 +47,7 @@ import SetNotifyStatusReducer from "./set_notify_status_reducer";
 import SetPhaseReducer from "./set_phase_reducer";
 import SetRoleReducer from "./set_role_reducer";
 import SetStateImpactReducer from "./set_state_impact_reducer";
+import SignOffTaskReducer from "./sign_off_task_reducer";
 import StartAutopilotDrillReducer from "./start_autopilot_drill_reducer";
 import StartDrillReducer from "./start_drill_reducer";
 import StartLegalClockReducer from "./start_legal_clock_reducer";
@@ -70,6 +71,7 @@ import MessagesRow from "./messages_table";
 import NotifyStatusesRow from "./notify_statuses_table";
 import PhaseAdvancesRow from "./phase_advances_table";
 import ScopeItemsRow from "./scope_items_table";
+import SignoffsRow from "./signoffs_table";
 import StateImpactsRow from "./state_impacts_table";
 import TasksRow from "./tasks_table";
 import TimelineEventsRow from "./timeline_events_table";
@@ -148,6 +150,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, ScopeItemsRow),
+  signoffs: __table({
+    name: 'signoffs',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, SignoffsRow),
   stateImpacts: __table({
     name: 'stateImpacts',
     indexes: [
@@ -186,6 +195,7 @@ const reducersSchema = __reducers(
   __reducerSchema("set_phase", SetPhaseReducer),
   __reducerSchema("set_role", SetRoleReducer),
   __reducerSchema("set_state_impact", SetStateImpactReducer),
+  __reducerSchema("sign_off_task", SignOffTaskReducer),
   __reducerSchema("start_autopilot_drill", StartAutopilotDrillReducer),
   __reducerSchema("start_drill", StartDrillReducer),
   __reducerSchema("start_legal_clock", StartLegalClockReducer),

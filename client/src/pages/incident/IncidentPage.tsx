@@ -1,11 +1,12 @@
 // Lane B owner: the whole incident on one screen: declare, phase, record, tasks, what was hit, fraud decisions.
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import type { Identity } from 'spacetimedb';
 import { useReducer, useTable } from 'spacetimedb/react';
-import { BarChart3, Check, CircleHelp, Download, Eye, Lock, Play, ShieldCheck, Snowflake, Square, ThumbsUp, Zap, type LucideIcon } from 'lucide-react';
+import { BarChart3, Check, CircleHelp, Download, Eye, Lock, Play, Radar, ShieldCheck, Snowflake, Square, ThumbsUp, UserCheck, Zap, type LucideIcon } from 'lucide-react';
 import { reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import AfterActionSummary from '@/components/AfterActionSummary';
-import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SCOPE_STATUSES, SEVERITIES, SeverityChip, WRITERS, can, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
+import { LEADS, PHASES, PHASE_LABEL, SCOPE_LABEL, SCOPE_STATUSES, SEVERITIES, SIGNOFF_TASKS, SeverityChip, WRITERS, can, incidentCode, useCurrentIncident, useMe } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -27,6 +28,20 @@ const SCOPE_STYLE: Record<string, { Icon: LucideIcon; cls: string }> = {
   unknown: { Icon: CircleHelp, cls: 'text-sev-medium border-sev-medium/60' },
   clear: { Icon: ShieldCheck, cls: 'text-ok border-ok/60' },
 };
+
+// Common bank systems to pick from in "What was hit" (fills name, hostname and a typical record count).
+const PRESETS: Record<string, { label: string; ref: string; type: string; records: number }> = {
+  core: { label: 'Core banking database', ref: 'core-db-01', type: 'system', records: 48_000 },
+  olb: { label: 'Online banking login server', ref: 'olb-web-02', type: 'system', records: 3_200 },
+  cards: { label: 'Card processing system', ref: 'card-proc-01', type: 'system', records: 22_000 },
+  atm: { label: 'ATM network controller', ref: 'atm-ctl-01', type: 'system', records: 0 },
+  ad: { label: 'Active Directory (staff logins)', ref: 'dc-01', type: 'system', records: 850 },
+  mail: { label: 'Staff email server', ref: 'mail-01', type: 'system', records: 0 },
+  dw: { label: 'Customer data warehouse', ref: 'dw-cust-01', type: 'system', records: 60_000 },
+  backup: { label: 'Backup server', ref: 'backup-01', type: 'system', records: 0 },
+  pii: { label: 'Customer PII export', ref: 's3://exports', type: 'system', records: 12_500 },
+};
+const PRESET_ITEMS = Object.fromEntries([['', 'Choose a common system…'], ...Object.entries(PRESETS).map(([k, p]) => [k, p.label])]);
 
 const money = (cents: bigint) => `$${(cents / 100n).toLocaleString()}.${(cents % 100n).toString().padStart(2, '0')}`;
 
@@ -54,13 +69,14 @@ export default function IncidentPage() {
         </div>
         <PhaseStepper incidentId={incident.id} phase={incident.phase} />
       </section>
+      <Detections incidentId={incident.id} />
       {summary && <AfterActionSummary incident={incident} />}
       <div className="grid gap-6 lg:grid-cols-2">
         <IncidentRecord incident={incident} />
         <Tasks incidentId={incident.id} phase={incident.phase} />
       </div>
       <Scope incidentId={incident.id} />
-      <Fraud incidentId={incident.id} />
+      <Fraud incidentId={incident.id} phase={incident.phase} />
     </div>
   );
 }
@@ -240,6 +256,57 @@ function DrillControls() {
   );
 }
 
+/**
+ * Incoming detections: what the security tools, the drill and the Nessie feed reported, newest first.
+ * Built from the timeline, what was hit and fraud alerts, which every member can see (the audit log is admin-only).
+ */
+function Detections({ incidentId }: { incidentId: bigint }) {
+  const [users] = useTable(tables.members);
+  const [events] = useTable(tables.timelineEvents);
+  const [scope] = useTable(tables.scopeItems);
+  const [alerts] = useTable(tables.fraudAlerts);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 30_000); // keeps "NEW" honest
+    return () => clearInterval(t);
+  }, []);
+  const source = (who: Identity) => users.find(u => u.identity.isEqual(who))?.name ?? 'Automatic feed';
+  const items = [
+    ...events.filter(e => e.incidentId === incidentId && e.kind === 'ioc').map(e => ({ key: `t${e.id}`, at: e.at.toDate(), kind: 'Security alert', text: e.text, from: source(e.actor), hot: true })),
+    ...scope
+      .filter(s => s.incidentId === incidentId && ['encrypted', 'exfiltrated', 'accessed'].includes(s.status))
+      .map(s => ({ key: `s${s.id}`, at: s.updatedAt.toDate(), kind: 'System hit', text: `${s.label}: ${SCOPE_LABEL[s.status]} (${s.recordsCount.toLocaleString()} records)`, from: source(s.updatedBy), hot: s.status !== 'accessed' })),
+    ...alerts
+      .filter(a => a.incidentId === incidentId)
+      .map(a => ({ key: `f${a.id}`, at: a.createdAt.toDate(), kind: 'Fraud', text: `${money(a.amountCents)} from ${a.accountRef}: ${a.reason}`, from: 'Fraud feed', hot: a.status === 'open' })),
+  ].sort((a, b) => b.at.getTime() - a.at.getTime());
+  const fresh = (d: Date) => Date.now() - d.getTime() < 2 * 60_000;
+  return (
+    <section className="glass flex flex-col gap-3 border-magenta/50 p-5" aria-label="Incoming detections">
+      <h2 className="flex items-center gap-2 font-heading text-sm font-bold tracking-[0.2em] text-white uppercase">
+        <Radar className="size-4 text-magenta" aria-hidden="true" /> Incoming detections
+        <span className="font-mono text-xs font-normal tracking-normal text-muted-foreground normal-case">· live from security tools, drill and bank feed</span>
+        {items.length > 0 && <span className="ml-auto font-mono text-xs text-muted-foreground">{items.length} total</span>}
+      </h2>
+      {items.length === 0 ? (
+        <p className="text-muted-foreground italic">Nothing detected yet. Alerts appear here the moment a tool reports them.</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-border/60" aria-live="polite">
+          {items.slice(0, 6).map(d => (
+            <li key={d.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2 text-sm">
+              <time className="font-mono text-xs text-muted-foreground">{d.at.toLocaleTimeString()}</time>
+              <span className={cn('rounded border px-1.5 font-mono text-xs uppercase', d.hot ? 'border-magenta/60 text-magenta' : 'border-border text-muted-foreground')}>{d.kind}</span>
+              {fresh(d.at) && <span className="font-mono text-xs font-bold text-neon">NEW</span>}
+              <span className="min-w-0 flex-1 break-words text-white">{d.text}</span>
+              <span className="text-xs text-muted-foreground">via {d.from}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 type Incident = NonNullable<ReturnType<typeof useCurrentIncident>>;
 
 function IncidentRecord({ incident }: { incident: Incident }) {
@@ -292,9 +359,13 @@ function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
   const [allTasks] = useTable(tables.tasks);
   const addTask = useReducer(reducers.addTask);
   const toggleTask = useReducer(reducers.toggleTask);
+  const signOffTask = useReducer(reducers.signOffTask);
+  const [signoffs] = useTable(tables.signoffs);
+  const [users] = useTable(tables.members);
   const run = useRun();
   const [title, setTitle] = useState('');
   const writer = can(me, WRITERS);
+  const nameOf = (who: Identity) => users.find(u => u.identity.isEqual(who))?.name ?? 'Autopilot';
   // Current phase first, then open before done.
   const tasks = allTasks
     .filter(t => t.incidentId === incidentId)
@@ -311,6 +382,36 @@ function Tasks({ incidentId, phase }: { incidentId: bigint; phase: string }) {
       <ul className="flex flex-col gap-1">
         {tasks.map(t => {
           const other = t.phase !== phase;
+          if (SIGNOFF_TASKS.has(t.title)) {
+            const so = signoffs.find(s => s.taskId === t.id);
+            const mineDone = !!so && !!me && so.doneBy.isEqual(me.identity);
+            const canVerify = !!so && !so.verifiedBy && !mineDone && can(me, LEADS);
+            return (
+              <li key={t.id.toString()} className={cn('flex flex-wrap items-start gap-3 rounded-md px-2 py-1.5', other && 'opacity-50')}>
+                <UserCheck className={cn('mt-0.5 size-4 shrink-0', t.done ? 'text-ok' : so ? 'text-sev-medium' : 'text-muted-foreground')} aria-hidden="true" />
+                <span className="min-w-0 flex-1">
+                  <span className={cn(t.done && 'text-muted-foreground line-through')}>{t.title}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {!so && 'Needs two people: one does it, a different lead verifies it'}
+                    {so && !so.verifiedBy && `Done by ${nameOf(so.doneBy)} · waiting for a different lead to verify`}
+                    {so?.verifiedBy && `Done by ${nameOf(so.doneBy)} · Verified by ${nameOf(so.verifiedBy)} · ${so.verifiedAt?.toDate().toLocaleTimeString()}`}
+                  </span>
+                </span>
+                {other && <span className="shrink-0 font-mono text-xs text-muted-foreground">{PHASE_LABEL[t.phase] ?? t.phase}</span>}
+                {writer && !so && (
+                  <Button size="sm" variant="outline" onClick={() => run(signOffTask({ taskId: t.id }), 'Marked done: waiting for verification')}>I did this</Button>
+                )}
+                {mineDone && !so?.verifiedBy && (
+                  <Button size="sm" variant="ghost" onClick={() => run(signOffTask({ taskId: t.id }), 'Sign-off withdrawn')}>Undo</Button>
+                )}
+                {canVerify && (
+                  <Button size="sm" onClick={() => window.confirm(`Verify "${t.title}"? You confirm you checked it yourself.`) && run(signOffTask({ taskId: t.id }), 'Verified')}>
+                    Verify
+                  </Button>
+                )}
+              </li>
+            );
+          }
           return (
             <li key={t.id.toString()} className={cn(other && 'opacity-50')}>
               <label className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-1.5 hover:bg-muted/40">
@@ -337,8 +438,16 @@ function Scope({ incidentId }: { incidentId: bigint }) {
   const me = useMe();
   const [allItems] = useTable(tables.scopeItems);
   const upsertScopeItem = useReducer(reducers.upsertScopeItem);
+  const [users] = useTable(tables.members);
   const run = useRun();
+  const [preset, setPreset] = useState('');
   const [form, setForm] = useState({ label: '', assetRef: '', assetType: 'system', status: 'unknown', records: '0' });
+  const pickPreset = (k: string) => {
+    setPreset(k);
+    const p = PRESETS[k];
+    if (p) setForm({ ...form, label: p.label, assetRef: p.ref, assetType: p.type, records: String(p.records) });
+  };
+  const isAuto = (who: Identity) => !users.some(u => u.identity.isEqual(who));
   const writer = can(me, WRITERS);
   const items = allItems.filter(s => s.incidentId === incidentId);
   const totals = Object.fromEntries(SCOPE_STATUSES.map(s => [s, 0n])) as Record<string, bigint>;
@@ -353,6 +462,7 @@ function Scope({ incidentId }: { incidentId: bigint }) {
     if (!Number.isInteger(n) || n < 0) return;
     save({ assetType: form.assetType, assetRef: form.assetRef, label: form.label, recordsCount: BigInt(n) }, form.status);
     setForm({ ...form, label: '', assetRef: '', records: '0' });
+    setPreset('');
   };
 
   return (
@@ -387,6 +497,7 @@ function Scope({ incidentId }: { incidentId: bigint }) {
               <TableRow key={it.id.toString()}>
                 <TableCell>
                   {it.label} <span className="font-mono text-xs text-muted-foreground">{it.assetRef}</span>
+                  {isAuto(it.updatedBy) && <span className="ml-2 rounded border border-neon/50 px-1 font-mono text-[10px] text-neon uppercase">Auto</span>}
                 </TableCell>
                 <TableCell>{ASSET_TYPES[it.assetType] ?? it.assetType}</TableCell>
                 <TableCell><ScopeChip status={it.status} /></TableCell>
@@ -404,6 +515,11 @@ function Scope({ incidentId }: { incidentId: bigint }) {
       {writer && (
         <form className="grid gap-3 rounded-xl border border-border/60 p-4 sm:grid-cols-2 lg:grid-cols-6 lg:items-end" onSubmit={submit}>
           <h3 className="font-bold sm:col-span-2 lg:col-span-6">Add affected system</h3>
+          <div className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-6">
+            <Label htmlFor="sc-preset">Quick pick</Label>
+            <Pick id="sc-preset" label="Quick pick a common bank system" value={preset} items={PRESET_ITEMS} onChange={pickPreset} />
+            <span className="text-xs text-muted-foreground">Fills the fields below; change anything before adding. The drill and the Nessie import add systems here on their own (marked Auto).</span>
+          </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="sc-label">Name</Label>
             <Input id="sc-label" required value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="Core banking DB" />
@@ -442,7 +558,10 @@ function ScopeChip({ status }: { status: string }) {
   );
 }
 
-function Fraud({ incidentId }: { incidentId: bigint }) {
+const AUTO_FREEZE_CENTS = 1_000_000n; // mirrors the module: $10,000
+
+function Fraud({ incidentId, phase }: { incidentId: bigint; phase: string }) {
+  const containing = PHASES.indexOf(phase as (typeof PHASES)[number]) >= PHASES.indexOf('contain');
   const me = useMe();
   const [allAlerts] = useTable(tables.fraudAlerts);
   const setFraudAlertStatus = useReducer(reducers.setFraudAlertStatus);
@@ -462,10 +581,23 @@ function Fraud({ incidentId }: { incidentId: bigint }) {
 
   return (
     <Panel title={<>Fraud: needs a decision {open.length > 0 && <span className="text-sev-critical">({open.length})</span>}</>}>
+      <p className="text-sm text-muted-foreground">
+        Transfers of $10,000 or more freeze automatically {containing ? 'now that the team is in Contain' : 'when the team reaches Contain'}. Smaller ones need a person to decide.
+      </p>
       {frozen.length > 0 && (
-        <p className="flex items-center gap-2 font-bold text-neon">
-          <Zap className="size-4" aria-hidden="true" /> {frozen.length} account{frozen.length === 1 ? '' : 's'} auto-frozen ({money(frozenTotal)})
-        </p>
+        <details className="rounded-lg border border-neon/40 px-3 py-2">
+          <summary className="flex cursor-pointer items-center gap-2 font-bold text-neon">
+            <Zap className="size-4" aria-hidden="true" /> {frozen.length} account{frozen.length === 1 ? '' : 's'} frozen ({money(frozenTotal)})
+          </summary>
+          <ul className="mt-2 flex flex-col gap-1 text-sm">
+            {frozen.map(a => (
+              <li key={a.id.toString()}>
+                <code className="font-mono">{a.accountRef}</code> · {money(a.amountCents)} · {a.reason} ·{' '}
+                <span className="text-muted-foreground">{a.amountCents >= AUTO_FREEZE_CENTS ? 'frozen automatically' : 'frozen by a person'}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       {open.length === 0 && <p className="text-muted-foreground italic">No suspicious transfers waiting for a decision.</p>}
       <ul className="flex flex-col gap-3">
@@ -476,6 +608,9 @@ function Fraud({ incidentId }: { incidentId: bigint }) {
               <div className="text-sm text-muted-foreground">
                 {a.reason} · {a.createdAt.toDate().toLocaleTimeString()} · transfer <span className="font-mono">{a.transferRef}</span>
               </div>
+              {a.amountCents >= AUTO_FREEZE_CENTS && !containing && (
+                <div className="mt-1 font-mono text-xs text-neon">Freezes automatically when you reach Contain</div>
+              )}
             </div>
             {writer && (
               <div className="flex gap-2">

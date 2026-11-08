@@ -39,12 +39,42 @@ test('declaring and moving phases creates guided tasks without duplicates', () =
   expect(count()).toBe(6);
 });
 
-test('transfers of $10,000 or more are frozen automatically', () => {
+test('transfers of $10,000 or more freeze automatically only from Contain on', () => {
   const h = setup();
   const alert = (amountCents: bigint) => ({ incidentId: 1n, accountRef: 'A', transferRef: 'T', amountCents, reason: 'r' });
+  const statuses = () => h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()].map(a => a.status));
   h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, alert(999_999n)));
   h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, alert(1_000_000n)));
-  expect(h.withReducerTx(as('admin'), ctx => [...ctx.db.fraudAlert.iter()].map(a => a.status))).toEqual(['open', 'frozen']);
+  expect(statuses()).toEqual(['open', 'open']); // Detect: flagged, not frozen
+  h.withReducerTx(as('admin'), ctx => mod.setPhase(ctx, { incidentId: 1n, phase: 'contain' }));
+  expect(statuses()).toEqual(['open', 'frozen']); // reaching Contain freezes the big one only
+  h.withReducerTx(as('admin'), ctx => mod.raiseFraudAlert(ctx, alert(2_000_000n)));
+  expect(statuses()).toEqual(['open', 'frozen', 'frozen']); // in Contain: instant
+});
+
+test('sign-off tasks need a different lead to verify', () => {
+  const h = setup();
+  const id = (sub: string) => h.withReducerTx(as(sub), ctx => ctx.sender);
+  const add = (sub: string, role: string) => {
+    const target = id(sub); // outside the next transaction: they can't nest
+    h.withReducerTx(as('owner'), ctx => mod.addMember(ctx, { target, name: sub, email: sub, role }));
+  };
+  add('resp', 'responder');
+  add('resp2', 'responder');
+  add('lead', 'incident_lead');
+  h.withReducerTx(as('admin'), ctx => mod.setPhase(ctx, { incidentId: 1n, phase: 'eradicate' }));
+  const tk = tasksOf(h, 'eradicate')[0];
+  const sign = (who: string) => h.withReducerTx(as(who), ctx => mod.signOffTask(ctx, { taskId: tk.id }));
+  expect(() => h.withReducerTx(as('resp'), ctx => mod.toggleTask(ctx, { taskId: tk.id }))).toThrow(/sign-off/);
+  sign('resp');
+  expect(tasksOf(h, 'eradicate')[0].done).toBe(false); // waiting for verification
+  expect(() => sign('resp2')).toThrow(/Requires role/); // a responder cannot verify
+  sign('lead');
+  expect(tasksOf(h, 'eradicate')[0].done).toBe(true);
+  expect(() => sign('lead')).toThrow(/Already verified/);
+  const so = h.withReducerTx(as('admin'), ctx => ctx.db.signoff.taskId.find(tk.id)!);
+  const [r, l] = [id('resp'), id('lead')];
+  expect(so.doneBy.isEqual(r) && so.verifiedBy!.isEqual(l)).toBe(true);
 });
 
 test('drill creates an incident and schedules steps; clients cannot fire steps themselves', () => {

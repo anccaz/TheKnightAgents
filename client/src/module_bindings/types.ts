@@ -161,6 +161,19 @@ export type ScopeItem = __Infer<typeof ScopeItem>;
 export const ScopeItems = __t.object("ScopeItems", {});
 export type ScopeItems = __Infer<typeof ScopeItems>;
 
+export const Signoff = __t.object("Signoff", {
+  taskId: __t.u64(),
+  incidentId: __t.u64(),
+  doneBy: __t.identity(),
+  doneAt: __t.timestamp(),
+  verifiedBy: __t.option(__t.identity()),
+  verifiedAt: __t.option(__t.timestamp()),
+});
+export type Signoff = __Infer<typeof Signoff>;
+
+export const Signoffs = __t.object("Signoffs", {});
+export type Signoffs = __Infer<typeof Signoffs>;
+
 export const StateImpact = __t.object("StateImpact", {
   id: __t.u64(),
   incidentId: __t.u64(),

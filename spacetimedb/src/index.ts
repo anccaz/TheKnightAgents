@@ -199,6 +199,19 @@ const autopilotStep = table(
   }
 );
 
+// Two-person sign-off on a task: one person does it, a different lead verifies it. The task is done only once verified.
+const signoff = table(
+  {},
+  {
+    taskId: t.u64().primaryKey(),
+    incidentId: t.u64().index(),
+    doneBy: t.identity(),
+    doneAt: t.timestamp(),
+    verifiedBy: t.identity().optional(),
+    verifiedAt: t.timestamp().optional(),
+  }
+);
+
 // Pending steps of a running attack drill; each row fires runDrillStep at its time.
 const drillStep = table(
   {},
@@ -219,6 +232,7 @@ const db = schema(
     phaseAdvance,
     phaseHold,
     autopilotStep,
+    signoff,
     user,
     incident,
     timelineEvent,
@@ -297,7 +311,10 @@ const GUIDED: Record<string, string[]> = {
     'Scan again to confirm no backdoors are left',
   ],
   recover: [
-    'Restore systems from clean, tested backups',
+    'Rebuild affected servers from clean, tested backups',
+    'Verify cryptographic hashes of the rebuilt core banking container',
+    'Confirm EDR clean scan on all isolated hosts',
+    'Rotate enterprise service account keys',
     'Watch restored systems closely for 48 hours',
     'Send customer notices once Legal approves',
   ],
@@ -307,6 +324,18 @@ const GUIDED: Record<string, string[]> = {
     'Mark every legal deadline as filed',
   ],
 };
+
+// Tasks that need two people: one does it, a different incident lead or admin verifies it (Remove threat, Recover).
+const SIGNOFF_TASKS = new Set([
+  'Remove the malware and every attacker login',
+  'Patch the hole they came in through',
+  'Scan again to confirm no backdoors are left',
+  'Rebuild affected servers from clean, tested backups',
+  'Verify cryptographic hashes of the rebuilt core banking container',
+  'Confirm EDR clean scan on all isolated hosts',
+  'Rotate enterprise service account keys',
+]);
+const VERIFIERS = ['incident_lead']; // admins always pass requireRole
 
 // Started automatically the first time data is marked stolen (our stand-in for "the bank determined it").
 // NOT LEGAL ADVICE: checked against sources on 2026-11-07, Legal must re-verify before relying on them.
@@ -383,14 +412,34 @@ function setScope(ctx: Ctx, args: ScopeArgs) {
   if (args.status === 'exfiltrated') autoLegalClocks(ctx, args.incidentId);
 }
 
+// Freezing customer accounts is a containment decision: big transfers freeze automatically only once the
+// incident is in Contain (or later). Before that they are flagged and freeze the moment the team reaches Contain.
+const phaseIndex = (phase: string) => PHASES.indexOf(phase as (typeof PHASES)[number]);
+const containing = (ctx: Ctx, incidentId: bigint) => phaseIndex(ctx.db.incident.id.find(incidentId)?.phase ?? '') >= phaseIndex('contain');
+const dollars = (cents: bigint) => `$${(cents / 100n).toLocaleString()}`;
+
 type AlertArgs = { incidentId: bigint; accountRef: string; transferRef: string; amountCents: bigint; reason: string };
 function raiseAlert(ctx: Ctx, args: AlertArgs) {
-  const frozen = args.amountCents >= AUTO_FREEZE_CENTS;
+  const big = args.amountCents >= AUTO_FREEZE_CENTS;
+  const frozen = big && containing(ctx, args.incidentId);
   const a = ctx.db.fraudAlert.insert({ ...args, id: 0n, status: frozen ? 'frozen' : 'open', createdAt: ctx.timestamp });
   if (frozen) {
-    timeline(ctx, args.incidentId, 'auto', `Account ${args.accountRef} frozen: $${(args.amountCents / 100n).toLocaleString()} transfer over the $10,000 limit`);
+    timeline(ctx, args.incidentId, 'auto', `Account ${args.accountRef} frozen: ${dollars(args.amountCents)} transfer over the $10,000 limit`);
     audit(ctx, 'auto_freeze', `${a.id}: ${args.accountRef}`);
+  } else if (big)
+    timeline(ctx, args.incidentId, 'auto', `Fraud flagged on ${args.accountRef}: ${dollars(args.amountCents)} transfer. Freezes automatically when the team reaches Contain`);
+}
+
+/** On reaching Contain: freeze every open alert over the limit in one go. */
+function freezeOnContain(ctx: Ctx, incidentId: bigint) {
+  const due = [...ctx.db.fraudAlert.incidentId.filter(incidentId)].filter(a => a.status === 'open' && a.amountCents >= AUTO_FREEZE_CENTS);
+  if (!due.length) return;
+  for (const a of due) {
+    ctx.db.fraudAlert.id.update({ ...a, status: 'frozen' });
+    audit(ctx, 'auto_freeze', `${a.id}: ${a.accountRef}`);
   }
+  const total = due.reduce((n, a) => n + a.amountCents, 0n);
+  timeline(ctx, incidentId, 'auto', `Contain started: froze ${due.length} account${due.length === 1 ? '' : 's'} over the $10,000 limit (${dollars(total)}): ${due.map(a => a.accountRef).join(', ')}`);
 }
 
 // ---------- Exec status update: one plain-words line in the incident's #exec channel ----------
@@ -485,6 +534,7 @@ function movePhase(ctx: Ctx, incidentId: bigint, phase: string) {
   timeline(ctx, incidentId, 'phase_change', `${inc.phase} -> ${phase}`);
   addGuidedTasks(ctx, incidentId, phase);
   audit(ctx, 'set_phase', `${incidentId}: ${phase}`);
+  if (phaseIndex(phase) >= phaseIndex('contain')) freezeOnContain(ctx, incidentId);
   cancelAdvance(ctx, incidentId);
   const hold = ctx.db.phaseHold.incidentId.find(incidentId);
   if (hold && hold.phase !== phase) ctx.db.phaseHold.incidentId.delete(incidentId);
@@ -601,7 +651,38 @@ export const toggleTask = db.reducer({ taskId: t.u64() }, (ctx, { taskId }) => {
   requireRole(ctx, ...WRITERS);
   const tk = ctx.db.task.id.find(taskId);
   if (!tk) throw new SenderError('No such task');
+  if (SIGNOFF_TASKS.has(tk.title)) throw new SenderError('This task needs a sign-off: mark it done, then a different lead verifies it');
   ctx.db.task.id.update({ ...tk, done: !tk.done });
+  progress(ctx, tk.incidentId);
+});
+
+/**
+ * Two-person rule. First call: a responder or lead says "I did it". Second call: a DIFFERENT incident lead or admin
+ * verifies it, and only then is the task done. The person who did it can withdraw before it is verified.
+ */
+export const signOffTask = db.reducer({ taskId: t.u64() }, (ctx, { taskId }) => {
+  const me = requireRole(ctx, ...WRITERS);
+  const tk = ctx.db.task.id.find(taskId);
+  if (!tk) throw new SenderError('No such task');
+  if (!SIGNOFF_TASKS.has(tk.title)) throw new SenderError('This task does not need a sign-off');
+  const so = ctx.db.signoff.taskId.find(taskId);
+  if (!so) {
+    ctx.db.signoff.insert({ taskId, incidentId: tk.incidentId, doneBy: ctx.sender, doneAt: ctx.timestamp, verifiedBy: undefined, verifiedAt: undefined });
+    timeline(ctx, tk.incidentId, 'action', `${me.name} marked done, waiting for verification: ${tk.title}`);
+    audit(ctx, 'signoff_done', `${taskId}: ${tk.title}`);
+  } else if (so.verifiedBy) {
+    throw new SenderError('Already verified');
+  } else if (so.doneBy.isEqual(ctx.sender)) {
+    ctx.db.signoff.taskId.delete(taskId); // withdraw before anyone verified it
+    timeline(ctx, tk.incidentId, 'action', `${me.name} withdrew their sign-off: ${tk.title}`);
+    audit(ctx, 'signoff_withdrawn', `${taskId}: ${tk.title}`);
+  } else {
+    requireRole(ctx, ...VERIFIERS);
+    ctx.db.signoff.taskId.update({ ...so, verifiedBy: ctx.sender, verifiedAt: ctx.timestamp });
+    ctx.db.task.id.update({ ...tk, done: true });
+    timeline(ctx, tk.incidentId, 'action', `${me.name} verified: ${tk.title}`);
+    audit(ctx, 'signoff_verified', `${taskId}: ${tk.title}`);
+  }
   progress(ctx, tk.incidentId);
 });
 
@@ -932,7 +1013,7 @@ function advisorFacts(ctx: Ctx, inc: IncidentRow, role: string, noticesJson: str
     `[I] Incident "${clip(inc.title, 120)}"; severity ${inc.severity}; type ${inc.kind}; current phase ${label(inc.phase)}; detected ${ago(inc.detectedAt)}.`,
     `[P] Playbook: phases in order ${PHASES.map(label).join(' > ')}. ` +
       (next ? `When every ${label(inc.phase)} task is done, the incident moves to ${label(next)} after a 30-second countdown unless the lead stays. ` : 'This is the last phase. ') +
-      'Fraud transfers of $10,000 or more are frozen automatically. Marking data stolen starts the federal deadline clocks (bank regulator 36h, SEC 8-K if material).',
+      'Fraud transfers of $10,000 or more are frozen automatically once the incident reaches Contain. Remove threat and Recover tasks need one person to mark them done and a different incident lead to verify them. Marking data stolen starts the federal deadline clocks (bank regulator 36h, SEC 8-K if material).',
   ];
   const tasks = [...ctx.db.task.incidentId.filter(id)].map(t => ({ tag: `K${t.id}`, id: `${t.id}`, title: t.title, phase: t.phase, done: t.done }));
   for (const t of tasks) lines.push(`[${t.tag}] Task (${label(t.phase)}, ${t.done ? 'done' : 'open'}): ${clip(t.title, 120)}`);
@@ -1044,7 +1125,7 @@ const DRILL: { waitSec: number; run: (ctx: Ctx, id: bigint) => void }[] = [
     waitSec: 8,
     run: (ctx, id) => {
       // Who lives where, as the Nessie importer would report it from customer addresses.
-      for (const [st, n] of [['TX', 8_140n], ['CA', 2_960n], ['FL', 880n], ['NY', 410n], ['OK', 110n]] as const)
+      for (const [st, n] of [['TX', 7_400n], ['CA', 2_100n], ['FL', 880n], ['GA', 760n], ['NC', 540n], ['NY', 410n], ['TN', 410n]] as const)
         setStateRecords(ctx, id, st, n);
       setScope(ctx, { incidentId: id, assetType: 'system', assetRef: 's3://avon-exports', label: 'Customer PII export', status: 'exfiltrated', recordsCount: 12_500n });
       execUpdate(ctx, id);
@@ -1123,7 +1204,15 @@ export const runAutopilotStep = db.reducer({ onSchedule: autopilotStep }, { row:
     .filter(tk => tk.phase === inc.phase && !tk.done)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
   const tk = open[0];
-  if (tk && !AUTO_TASKS[tk.title]) {
+  if (tk && SIGNOFF_TASKS.has(tk.title)) {
+    // Drill only: a real incident needs two different people (signOffTask enforces that).
+    const at = ctx.timestamp;
+    const so = { taskId: tk.id, incidentId: id, doneBy: ctx.sender, doneAt: at, verifiedBy: ctx.sender, verifiedAt: at };
+    if (ctx.db.signoff.taskId.find(tk.id)) ctx.db.signoff.taskId.update(so);
+    else ctx.db.signoff.insert(so);
+    ctx.db.task.id.update({ ...tk, done: true });
+    timeline(ctx, id, 'auto', `Autopilot (drill): signed off and verified: ${tk.title}`);
+  } else if (tk && !AUTO_TASKS[tk.title]) {
     ctx.db.task.id.update({ ...tk, done: true });
     timeline(ctx, id, 'auto', `Autopilot: ${tk.title}`);
   } else if (tk?.title === 'Review every fraud alert: freeze or dismiss') {
@@ -1191,6 +1280,9 @@ export const notifyStatuses = db.view({ name: 'notifyStatuses', public: true }, 
 );
 export const phaseAdvances = db.view({ name: 'phaseAdvances', public: true }, t.array(phaseAdvance.rowType), ctx =>
   roleOf(ctx) ? [...ctx.db.phaseAdvance.iter()] : []
+);
+export const signoffs = db.view({ name: 'signoffs', public: true }, t.array(signoff.rowType), ctx =>
+  roleOf(ctx) ? [...ctx.db.signoff.iter()] : []
 );
 export const auditEntries = db.view({ name: 'auditEntries', public: true }, t.array(auditLog.rowType), ctx =>
   roleOf(ctx) === 'admin' ? [...ctx.db.auditLog.iter()] : []

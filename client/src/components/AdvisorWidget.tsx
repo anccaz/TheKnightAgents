@@ -6,7 +6,7 @@ import { Bot, Send, ShieldAlert, X } from 'lucide-react';
 import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import { useNotices } from '@/components/NotifyPriorityChart';
-import { PHASE_LABEL, ROLE_LABEL, useCurrentIncident, useMe } from '@/components/shared';
+import { PHASE_LABEL, ROLE_LABEL, SIGNOFF_TASKS, useCurrentIncident, useMe } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -185,6 +185,7 @@ function ConfirmActionPage({
   const [clocks] = useTable(tables.legalClocks);
   const run = useRun();
   const toggleTask = useReducer(reducers.toggleTask);
+  const signOffTask = useReducer(reducers.signOffTask);
   const setPhase = useReducer(reducers.setPhase);
   const setFraudAlertStatus = useReducer(reducers.setFraudAlertStatus);
   const setNotifyStatus = useReducer(reducers.setNotifyStatus);
@@ -216,7 +217,7 @@ function ConfirmActionPage({
 
   const perform = (): Promise<void> => {
     switch (action.type) {
-      case 'complete_task': return toggleTask({ taskId: id! });
+      case 'complete_task': return task && SIGNOFF_TASKS.has(task.title) ? signOffTask({ taskId: id! }) : toggleTask({ taskId: id! });
       case 'set_phase': return setPhase({ incidentId, phase: action.ref });
       case 'freeze_alert': return setFraudAlertStatus({ alertId: id!, status: 'frozen' });
       case 'dismiss_alert': return setFraudAlertStatus({ alertId: id!, status: 'dismissed' });
