@@ -118,9 +118,9 @@ export default function IncidentPage() {
     );
   if (mode === 'conversation')
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+      <div className="flex flex-col gap-6">
         <AgentTrigger incidentId={incident.id} phase={incident.phase} />
-        {header}
+        <section className="glass p-5">{header}</section>
         <ConversationView incident={incident} />
       </div>
     );

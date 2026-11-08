@@ -2,14 +2,14 @@
 // numbers, then simple cards. Every number comes from the role-filtered views, so a tile your role may not see says so.
 import { useEffect, useState, type ReactNode } from 'react';
 import { useReducer, useTable } from 'spacetimedb/react';
-import { Bot, Clock, Lock, Radar, ShieldAlert, Snowflake, ThumbsUp, Users, Wallet, Zap } from 'lucide-react';
+import { Bot, Clock, Landmark, Lock, Radar, ShieldAlert, Snowflake, ThumbsUp, Users, Wallet, Zap } from 'lucide-react';
 import { reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import { LEADS, PHASES, PHASE_LABEL, SEE_ALL, SEE_RECORDS, can, useCurrentIncident, useMe } from '@/components/shared';
 import AfterActionSummary from '@/components/AfterActionSummary';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { AutoAdvanceBanner, Tasks } from './IncidentPage';
+import { AutoAdvanceBanner, NessieImport, Tasks } from './IncidentPage';
 
 type Incident = NonNullable<ReturnType<typeof useCurrentIncident>>;
 
@@ -102,6 +102,8 @@ export default function OverviewView({ incident }: { incident: Incident }) {
 
       {incident.phase === 'post_incident' && <AfterActionSummary incident={incident} />}
 
+      <NessieCard incidentId={id} />
+
       <div className="grid gap-5 lg:grid-cols-3">
         <StatesCard incidentId={id} hidden={!seeRecords} />
         <DeadlinesCard incidentId={id} hidden={!seeRecords} />
@@ -149,6 +151,85 @@ function Hero({ incident }: { incident: Incident }) {
         </Button>
       )}
     </section>
+  );
+}
+
+/** Capital One's Nessie: import or scan the next accounts, then how much of the bank was checked and what was flagged. */
+function NessieCard({ incidentId }: { incidentId: bigint }) {
+  const me = useMe();
+  const [cursors] = useTable(tables.nessieCursors);
+  const [scope] = useTable(tables.scopeItems);
+  const [alerts] = useTable(tables.fraudAlerts);
+  const cur = cursors.find(c => c.incidentId === incidentId);
+  const lead = can(me, LEADS);
+  if (!cur && !lead) return null; // nothing imported and this role cannot import
+  const customers = scope.find(s => s.incidentId === incidentId && s.assetRef === 'nessie-customers')?.recordsCount ?? 0n;
+  const flagged = alerts.filter(a => a.incidentId === incidentId && /^(withdrawal|bill):/.test(a.transferRef)).sort((a, b) => Number(b.amountCents - a.amountCents));
+  const flaggedCents = flagged.reduce((n, a) => n + a.amountCents, 0n);
+  const pct = cur && cur.total ? Math.round((cur.checked / cur.total) * 100) : 0;
+  const mini = (label: string, value: string) => (
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-xl font-semibold tabular-nums text-white">{value}</div>
+    </div>
+  );
+  return (
+    <Card title="Bank data from Nessie (Capital One)" icon={<Landmark />} className="border-emerald-400/15">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div className="flex flex-col gap-4">
+          {cur ? (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                {mini('Customers', customers.toLocaleString())}
+                {mini('Accounts checked', `${cur.checked} / ${cur.total}`)}
+                {mini('Suspicious', String(flagged.length))}
+              </div>
+              <div>
+                <div className="mb-1.5 flex justify-between text-xs text-muted-foreground">
+                  <span>Bank scanned for fraud</span>
+                  <span className="tabular-nums">{pct}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-white/[0.06]">
+                  <div className="h-2 rounded-full bg-emerald-400" style={{ width: `${Math.max(2, pct)}%` }} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">Pull the bank's customers and transactions from Capital One's Nessie API: customers become people affected per state, and suspicious withdrawals and bills become fraud alerts.</p>
+          )}
+          <div className="[&>div]:border-0 [&>div]:bg-transparent [&>div]:p-0 [&>div>span]:basis-full">
+            <NessieImport incidentId={incidentId} />
+          </div>
+        </div>
+        {cur && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-baseline justify-between text-xs text-muted-foreground">
+              <span>Suspicious transactions found</span>
+              {can(me, SEE_ALL) && flagged.length > 0 && <span className="tabular-nums">{money(flaggedCents)} flagged</span>}
+            </div>
+            {!can(me, SEE_ALL) ? (
+              <p className="text-sm text-muted-foreground">Amounts and accounts are shared with leadership only.</p>
+            ) : flagged.length === 0 ? (
+              <p className="text-sm text-muted-foreground">None so far in the accounts checked.</p>
+            ) : (
+              <ul className="flex flex-col divide-y divide-white/[0.06] text-sm">
+                {flagged.slice(0, 5).map(a => (
+                  <li key={`${a.id}`} className="flex items-baseline gap-3 py-2 first:pt-0">
+                    <span className="w-20 shrink-0 font-semibold tabular-nums text-white">{money(a.amountCents)}</span>
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                      {a.accountRef} · {a.reason}
+                    </span>
+                    <span className={cn('shrink-0 text-xs', a.status === 'frozen' ? 'text-sky-300' : a.status === 'open' ? 'text-amber-300' : 'text-muted-foreground')}>
+                      {a.status === 'frozen' ? 'Frozen' : a.status === 'open' ? 'Open' : 'Fine'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
