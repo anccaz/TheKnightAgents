@@ -18,8 +18,9 @@ const PAGES = {
 type PageKey = keyof typeof PAGES;
 
 function Background() {
+  // Full-screen React Bits background (settings from the team's chosen preset).
   return (
-    <div className="pointer-events-none fixed inset-0 -z-10" aria-hidden="true">
+    <div style={{ width: '100%', height: '100vh', position: 'fixed', inset: 0, zIndex: 0 }}>
       <GradientASCII
         colors={['#1e3fd8', '#82a6e0', '#38bcf6', '#ca0153', '#580534']}
         shape="horizon"
@@ -28,6 +29,7 @@ function Background() {
         density={0.8}
         glyphOpacity={0.85}
         glow={0.4}
+        depthOfField={0}
         flicker={0.2}
         softness={0.5}
         scale={1.7}
@@ -35,14 +37,13 @@ function Background() {
         speed={1}
         gradientOpacity={0.9}
         grain={0.08}
+        variation={0}
         mouseInteraction
         scrambleRadius={0.1}
         clickEffect="burst"
         intro
-        style={{ position: 'absolute', inset: 0 }}
+        lightMode={false}
       />
-      {/* Dim the art behind content so text stays readable under stress */}
-      <div className="absolute inset-0 bg-gradient-to-b from-background/75 via-background/60 to-background/85" />
     </div>
   );
 }
@@ -62,7 +63,8 @@ export default function App() {
   return (
     <div className="min-h-screen text-foreground">
       <Background />
-      <header className="sticky top-0 z-20 border-b border-border bg-background/70 backdrop-blur-md">
+      <div className="relative z-10">
+      <header className="sticky top-0 z-20 border-b border-border bg-background/35 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <span className="font-mono text-lg font-bold tracking-[0.25em] text-neon neon-text">
             BREACH<span className="text-magenta magenta-text">//</span>ROOM
@@ -112,6 +114,7 @@ export default function App() {
         )}
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6">{me ? <Page /> : <JoinScreen />}</main>
+      </div>
     </div>
   );
 }

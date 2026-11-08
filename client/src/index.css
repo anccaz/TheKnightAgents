@@ -96,7 +96,7 @@
     /* Cyberpunk palette: #1e3fd8 #82a6e0 #38bcf6 #ca0153 #580534 */
     --background: #04050d;
     --foreground: #e6ecff;
-    --card: rgb(8 12 32 / 0.72);
+    --card: rgb(8 12 32 / 0.42);
     --card-foreground: #e6ecff;
     --popover: #0a0f26;
     --popover-foreground: #e6ecff;
@@ -134,15 +134,17 @@
     @apply border-border outline-ring/50;
     }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background: transparent; /* the ASCII background shows through */
     }
   html {
     @apply font-sans;
+    background-color: #04050d;
     }
 }
 /* Neon glass panels and glow text */
 @layer components {
-  .glass { @apply bg-card backdrop-blur-md border border-border rounded-xl shadow-[0_0_0_1px_rgb(56_188_246/0.06),0_8px_40px_-12px_rgb(30_63_216/0.45)]; }
+  .glass { @apply bg-card backdrop-blur-[3px] border border-border rounded-xl shadow-[0_0_0_1px_rgb(56_188_246/0.06),0_8px_40px_-12px_rgb(30_63_216/0.45)]; }
   .neon-text { text-shadow: 0 0 12px rgb(56 188 246 / 0.6); }
   .magenta-text { text-shadow: 0 0 12px rgb(202 1 83 / 0.7); }
 }
