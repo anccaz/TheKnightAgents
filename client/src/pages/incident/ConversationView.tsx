@@ -1,9 +1,10 @@
 // Conversation view: the incident as one live thread. Detections, AI briefings and fraud alerts arrive as messages
-// you act on in place; the side rail keeps the phase and the next steps. Same data and reducers as the classic view.
+// you act on in place, and Knight Agent asks the next question (next step, sign-off, phase move). Same data and reducers
+// as the classic view.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useReducer, useTable } from 'spacetimedb/react';
+import { useProcedure, useReducer, useTable } from 'spacetimedb/react';
 import { Bot, ChevronRight, Hash, Lock, Radar, Send, ShieldAlert, Snowflake, Sparkles, ThumbsUp, Zap } from 'lucide-react';
-import { reducers, tables } from '@/module_bindings';
+import { procedures, reducers, tables } from '@/module_bindings';
 import { useRun } from '@/components/Toast';
 import { LEADS, PHASES, PHASE_LABEL, PRIVILEGED, SCOPE_LABEL, SEE_RECORDS, WRITERS, can, useCurrentIncident, useMe } from '@/components/shared';
 import AfterActionSummary from '@/components/AfterActionSummary';
@@ -11,7 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { AutoAdvanceBanner, IncidentRecord, NessieImport, NessiePanel, Scope, Tasks } from './IncidentPage';
+import { AutoAdvanceBanner } from './IncidentPage';
+import { AgentPrompts, AskBubbles, NessieCard, type Ask } from './AgentPrompts';
 
 type Incident = NonNullable<ReturnType<typeof useCurrentIncident>>;
 type Item =
@@ -19,7 +21,9 @@ type Item =
   | { type: 'agent'; key: string; at: Date; channel: string; title: string; body: string }
   | { type: 'event'; key: string; at: Date; kind: string; who: string; text: string }
   | { type: 'phase'; key: string; at: Date; text: string }
-  | { type: 'fraud'; key: string; at: Date; id: bigint; account: string; cents: bigint; reason: string; status: string };
+  | { type: 'fraud'; key: string; at: Date; id: bigint; account: string; cents: bigint; reason: string; status: string }
+  | { type: 'nessie'; key: string; at: Date }
+  | Ask;
 
 const money = (cents: bigint) => `$${(cents / 100n).toLocaleString()}`;
 const AVATAR = ['from-sky-400 to-indigo-500', 'from-fuchsia-400 to-pink-500', 'from-emerald-400 to-teal-500', 'from-amber-300 to-orange-500', 'from-violet-400 to-purple-600'];
@@ -29,13 +33,9 @@ const initials = (name: string) => name.split(/\s+/).map(w => w[0]).join('').sli
 export default function ConversationView({ incident }: { incident: Incident }) {
   const summary = incident.phase === 'post_incident';
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PhaseRail incident={incident} />
       {summary && <AfterActionSummary incident={incident} />}
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-        <Details incident={incident} />
-        <Tasks incidentId={incident.id} phase={incident.phase} />
-      </div>
       <Thread incident={incident} />
     </div>
   );
@@ -52,6 +52,9 @@ function Thread({ incident }: { incident: Incident }) {
   const sendMessage = useReducer(reducers.sendMessage);
   const addTimelineEvent = useReducer(reducers.addTimelineEvent);
   const setFraudAlertStatus = useReducer(reducers.setFraudAlertStatus);
+  const [cursors] = useTable(tables.nessieCursors);
+  const askAdvisor = useProcedure(procedures.askAdvisor);
+  const [asks, setAsks] = useState<Ask[]>([]);
   const run = useRun();
   const [view, setView] = useState<'all' | bigint>('all');
   const [target, setTarget] = useState<bigint | 'note' | null>(null);
@@ -91,20 +94,37 @@ function Thread({ incident }: { incident: Incident }) {
     for (const a of alerts)
       if (a.incidentId === incident.id)
         items.push({ type: 'fraud', key: `f${a.id}`, at: a.createdAt.toDate(), id: a.id, account: a.accountRef, cents: a.amountCents, reason: a.reason, status: a.status });
+    const cur = cursors.find(c => c.incidentId === incident.id);
+    if (cur) items.push({ type: 'nessie', key: 'nessie', at: cur.at.toDate() });
+    items.push(...asks);
   }
   items.sort((a, b) => a.at.getTime() - b.at.getTime());
 
   useEffect(() => {
     const el = list.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [items.length, view]);
+  }, [items.length, view, asks]);
 
   const sendTo = target ?? (view !== 'all' ? view : general?.id ?? null);
   const writer = can(me, WRITERS);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const t = text.trim();
-    if (!t || sendTo === null) return;
+    if (!t) return;
+    // "@agent ..." asks the incident advisor; the answer appears in this thread (only on this screen).
+    const q = t.match(/^@agent\b[,:]?\s*(.*)$/i);
+    if (q) {
+      const key = `ask${Date.now()}`;
+      const question = q[1] || 'What should we do next?';
+      setAsks(a => [...a, { type: 'ask', key, at: new Date(), question, answer: null }]);
+      const answer = (s: string) => setAsks(a => a.map(x => (x.key === key ? { ...x, answer: s } : x)));
+      askAdvisor({ incidentId: incident.id, question, history: '', notices: '[]' })
+        .then(json => answer(String(JSON.parse(json).answer ?? '').replace(/\s*\[[A-Z]\d*\]/g, '')))
+        .catch(e => answer(`I couldn't answer that: ${e instanceof Error ? e.message : e}`));
+      setText('');
+      return;
+    }
+    if (sendTo === null) return;
     if (sendTo === 'note') run(addTimelineEvent({ incidentId: incident.id, kind: 'note', text: t }), 'Logged to the timeline');
     else run(sendMessage({ channelId: sendTo, text: t }));
     setText('');
@@ -116,7 +136,7 @@ function Thread({ incident }: { incident: Incident }) {
   const stolen = scope.filter(s => s.incidentId === incident.id && s.status === 'exfiltrated').reduce((n, s) => n + s.recordsCount, 0n);
 
   return (
-    <section className="glass flex h-[40rem] flex-col overflow-hidden p-0" aria-label="Incident conversation">
+    <section className="glass flex h-[calc(100vh-19rem)] min-h-[32rem] flex-col overflow-hidden p-0" aria-label="Incident conversation">
       <header className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-gradient-to-r from-sky-500/10 via-violet-500/10 to-fuchsia-500/10 px-4 py-3">
         <span className="relative mr-1 flex size-2.5">
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
@@ -154,8 +174,11 @@ function Thread({ incident }: { incident: Incident }) {
             {it.type === 'phase' && <PhaseDivider it={it} />}
             {it.type === 'event' && <EventLine it={it} />}
             {it.type === 'fraud' && <FraudCard it={it} canDecide={can(me, LEADS)} decide={decide} />}
+            {it.type === 'nessie' && <NessieCard incidentId={incident.id} at={it.at} />}
+            {it.type === 'ask' && <AskBubbles it={it} />}
           </li>
         ))}
+        {view === 'all' && <AgentPrompts incident={incident} />}
       </ol>
 
       <form onSubmit={submit} className="flex flex-col gap-2 border-t border-white/10 bg-background/60 p-3">
@@ -179,10 +202,10 @@ function Thread({ incident }: { incident: Incident }) {
             id="room-msg"
             value={text}
             onChange={e => setText(e.target.value)}
-            placeholder={sendTo === 'note' ? 'What just happened? (goes in the incident record)' : `Message #${sendTo !== null ? chName.get(sendTo)?.name ?? '' : ''}`}
+            placeholder={sendTo === 'note' ? 'What just happened? (goes in the incident record)' : `Message #${sendTo !== null ? chName.get(sendTo)?.name ?? '' : ''}, or ask "@agent which deadline is closest?"`}
             className="h-11 rounded-full border-white/10 bg-white/5 px-4"
           />
-          <Button type="submit" disabled={!text.trim() || sendTo === null} className="h-11 rounded-full bg-gradient-to-r from-sky-500 to-violet-600 px-5 text-white hover:opacity-90">
+          <Button type="submit" disabled={!text.trim()} className="h-11 rounded-full bg-gradient-to-r from-sky-500 to-violet-600 px-5 text-white hover:opacity-90">
             <Send /> Send
           </Button>
         </div>
@@ -357,41 +380,3 @@ function PhaseRail({ incident }: { incident: Incident }) {
   );
 }
 
-/** Everything else, folded away until someone needs it. */
-function Details({ incident }: { incident: Incident }) {
-  const at = PHASES.indexOf(incident.phase as (typeof PHASES)[number]);
-  return (
-    <section className="glass flex flex-col gap-3 p-5">
-      <h2 className="font-heading text-sm font-bold tracking-[0.2em] text-white uppercase">Bank data</h2>
-      <div className="[&>div>span]:basis-full">
-        <NessieImport incidentId={incident.id} />
-      </div>
-      <div className="grid items-start gap-3 sm:grid-cols-2">
-        <Fold title="Incident record">
-          <IncidentRecord incident={incident} />
-        </Fold>
-        <Fold title="Nessie bank data">
-          <div className="[&_.lg\:grid-cols-4]:grid-cols-2! [&_.lg\:grid-cols-2]:grid-cols-1!">
-            <NessiePanel incidentId={incident.id} />
-          </div>
-        </Fold>
-      </div>
-      {at >= PHASES.indexOf('analyze') && (
-        <Fold title="What was hit">
-          <Scope incidentId={incident.id} />
-        </Fold>
-      )}
-    </section>
-  );
-}
-
-function Fold({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <details className="group rounded-xl border border-white/10 bg-white/[0.03] [&_section]:border-0 [&_section]:bg-transparent [&_section]:p-0 [&_section]:shadow-none">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium">
-        <ChevronRight className="size-4 transition-transform group-open:rotate-90" aria-hidden="true" /> {title}
-      </summary>
-      <div className="px-3 pb-3">{children}</div>
-    </details>
-  );
-}
